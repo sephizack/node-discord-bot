@@ -145,7 +145,6 @@ module PadelBot {
             let taskType = taskDataSplit[0]
             if (taskType == "book")
             {
-                // TODO check format
                 if (taskDataSplit.length != 4)
                 {
                     this.discordBot.sendMessage(`Wrong task format. Expecting 4 arguments, got ${taskDataSplit.length}`, {color:"#ff0000"})
@@ -242,8 +241,6 @@ module PadelBot {
                 color: color
             })
         }
-
-
 
         private async callBookingApi(url = '', body = "", method = 'POST', getCookies = false, referrer = "") 
         {
@@ -386,6 +383,7 @@ module PadelBot {
         private async reserve(date, time, schedule, csrf_reservation)
         {
             console.log("Booking...")
+            // TODO duration hardcoded to 90
             let reply = await this.callBookingApi(
                 "/reservation/process",
                 `action_type=create&choice=with_none&default_date=${date}&default_timestart=${time}&default_timeend=${this.getNextTime(time)}&default_duration=90&default_schedule=${schedule}&default_row=0&poll_request_id=0&csrf_reservation=${csrf_reservation}`
