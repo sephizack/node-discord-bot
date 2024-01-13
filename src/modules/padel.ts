@@ -232,7 +232,7 @@ module PadelBot {
             {
                 let aTask = this.tasks[i]
                 fields.push({
-                    name: `${i} - ${aTask.type}`,
+                    name: `Task ${i}: ${aTask.type}`,
                     value: this.taskToString(aTask)
                 })
             }
