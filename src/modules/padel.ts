@@ -12,6 +12,7 @@ module PadelBot {
             this.schedules = configData.schedules
             this.credentials = configData.credentials
             this.allowedTimes = configData.allowedTimes
+            this.duration = configData.duration
             this.daysBeforeBooking = configData.daysBeforeBooking
             this.clubs = configData.clubs
             this.baseUrl = configData.baseUrl
@@ -19,7 +20,7 @@ module PadelBot {
             this.startTaskDeamon()
 
             Logger.info("Padel Bot started")
-            // this.discordBot.sendMessage("Padel Bot just re-started, no task pending")
+            this.discordBot.sendMessage("Padel Bot just re-started, no task pending", {color:"#800080"})
         }
 
         public handleAction(type:string, data: string) {
@@ -286,11 +287,9 @@ module PadelBot {
                 var cookies_list = setCookie.parse(splitCookieHeaders);
                 for (let cookie of cookies_list)
                 {
-                    // console.log("Setting cookie", cookie.name, cookie.value);
                     this.currentCookies[cookie.name] = cookie.value;
                 }
             }
-            // console.log("Updated Cookies", this.currentCookies);
             let rawData:any = await response.text();
             let isJson = false
             try {
@@ -316,11 +315,9 @@ module PadelBot {
                 true)
             if (reply.status != 200)
             {
-                console.log("Error logging in");
-                console.log(reply.error);
+                Logger.error("Error logging in", reply.error);
                 return false;
             }
-            // console.log(csrf_auth_login)
             if (reply.isJson && csrf_auth_login == "")
             {
                 let handlers = reply.data?.handlers
@@ -328,23 +325,23 @@ module PadelBot {
                 let new_csrf_auth_login = args ? args[1] : null
                 if (new_csrf_auth_login)
                 {
-                    console.log("Logging in with csrf_auth_login", new_csrf_auth_login);
+                    Logger.debug("Logging in with csrf_auth_login", new_csrf_auth_login);
                     return this.login(clubid, user, password, new_csrf_auth_login);
                 }
                 else
                 {
-                    console.log("Error logging in, unable to find csrf_auth_login in", reply.data);
+                    Logger.warning("Error logging in, unable to find csrf_auth_login in", reply.data);
                     return false;
                 }
             }
             else if (reply.isJson && reply.data.success)
             {
-                console.log("Logged in successfully !!!");
+                Logger.ok("Logged in successfully !!!");
                 return true;
             }
             else
             {
-                console.log("Error logging in: ", reply.data);
+                Logger.error("Error logging in: ", reply.data);
                 return false;
             }
         }
@@ -352,56 +349,51 @@ module PadelBot {
 
         private async getTokenForSchedule(dateDiffInDays, time, schedule)
         {
-            console.log(`Checking availabilty for schedule ${schedule} with date ${dateDiffInDays} at ${time}`)
+            Logger.debug(`Checking availabilty for schedule ${schedule} with date ${dateDiffInDays} at ${time}`)
             let reply = await this.callBookingApi(
                 "/reservation/switch",
-                `date=${dateDiffInDays}&schedule=${schedule}&timestart=${time}&duration=90`,
+                `date=${dateDiffInDays}&schedule=${schedule}&timestart=${time}&duration=${this.duration}`,
                 "POST",
                 false,
                 "/reservation"
             )
             if (reply.status != 200)
             {
-                console.log(`Error getting availabilty for schedule ${schedule}`);
-                console.log(reply.error);
+                Logger.warning(`Error getting availabilty for schedule ${schedule}`, reply.error);
                 return null;
             }
             if (!reply.isJson)
             {
-                // Availabilty found
                 let csrf_reservation = reply.data.split("csrf_reservation\" value=\"")[1].split("\"")[0];
                 return csrf_reservation
             }
             else
             {
-                // No availabilty
-                console.log("Unable to get CSRF", reply.data);
+                Logger.warning("Unable to get CSRF", reply.data);
                 return null;
             }
         }
 
         private async reserve(date, time, schedule, csrf_reservation)
         {
-            console.log("Booking...")
-            // TODO duration hardcoded to 90
             let reply = await this.callBookingApi(
                 "/reservation/process",
-                `action_type=create&choice=with_none&default_date=${date}&default_timestart=${time}&default_timeend=${this.getNextTime(time)}&default_duration=90&default_schedule=${schedule}&default_row=0&poll_request_id=0&csrf_reservation=${csrf_reservation}`
+                `action_type=create&choice=with_none&default_date=${date}&default_timestart=${time}&default_timeend=${this.getNextTime(time)}&default_duration=${this.duration}&default_schedule=${schedule}&default_row=0&poll_request_id=0&csrf_reservation=${csrf_reservation}`
             )
             
             if (reply.status == 200 && reply.isJson && reply.data.success)
             {
-                console.log("Booked successfully !!!");
+                Logger.ok("Booked successfully !!!");
                 return true;
             }
             else if (reply.status == 200 && reply.isJson && reply.data.alert?.title)
             {
-                console.log("Not possible to book slot:", reply.data.alert.title);
-                return true;
+                Logger.ok("Not possible to book slot:", reply.data.alert.title);
+                return false;
             }
             else
             {
-                console.log("Unable to book slot", reply.status, reply.error, reply.data);
+                Logger.error("Unable to book slot", reply.status, reply.error, reply.data);
                 return false;
             }
         }
@@ -411,10 +403,9 @@ module PadelBot {
             let isLoggedIn = await this.login(clubid, credential.login, credential.password);
             if (!isLoggedIn)
             {
-                console.log("Unable to login");
+                Logger.warning("Unable to login");
                 return;
             }
-            // console.log('Current Cookies', this.currentCookies);
             let timeInMinutes = parseInt(time.split(":")[0]) * 60 + parseInt(time.split(":")[1]);
             
             for (let schedule of this.schedules)
@@ -425,7 +416,7 @@ module PadelBot {
                 let csrf_reservation = await this.getTokenForSchedule(dateDiffInDays, timeInMinutes, schedule.value);
                 if (csrf_reservation != null)
                 {
-                    console.log(`Trying to book ${date} ${time} on schedule ${schedule.name} with token : ${csrf_reservation}`);
+                    Logger.info(`Trying to book ${date} ${time} on schedule ${schedule.name} with token : ${csrf_reservation}`);
                     let isBooked = await this.reserve(date, time, schedule.value, csrf_reservation);
                     if (isBooked)
                     {
@@ -434,7 +425,7 @@ module PadelBot {
                 }
                 else
                 {
-                    console.log("No availabilty for requested date and time");
+                    Logger.info("No availabilty for requested date and time");
                 }
             }
         }
@@ -450,17 +441,15 @@ module PadelBot {
                 let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
                 let requestedDay = parseInt(iTask.date.split("-")[2]) + 30*parseInt(iTask.date.split("-")[1]) + 365*parseInt(iTask.date.split("-")[0]);
                 let daysDiff = requestedDay - localDay
-                Logger.debug(`Local day: ${localDay}, Requested day: ${requestedDay}, Diff: ${daysDiff}`)
+                // Logger.debug(`Local day: ${localDay}, Requested day: ${requestedDay}, Diff: ${daysDiff}`)
                 if (requestedDay < localDay)
                 {
                     iTask.status = "abandonned"
-                    Logger.debug(`abandonned`)
                     this.notifyTaskUpdate(iTask, `Abandonned as requested slot is in the past`, "#ff0000")
                 }
                 else if (requestedDay - localDay <= this.daysBeforeBooking)
                 {
                     iTask.status = "trying"
-                    Logger.debug(`Now trying`)
                     this.notifyTaskUpdate(iTask, `Reservation should be opened, starting to try to book`)
                 }
             }
@@ -514,6 +503,7 @@ module PadelBot {
         schedules:any;
         credentials:any;
         allowedTimes:any;
+        duration:any;
         clubs:any;
         baseUrl:string;
     }

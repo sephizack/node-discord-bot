@@ -16,6 +16,7 @@
         "clubs": {
             "myclub": 1234
         },
+		"duration": 90,
         "schedules": [
             {
                 "name": "Padel 1",
