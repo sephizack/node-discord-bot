@@ -9,30 +9,30 @@
 			],
 			"customData": {}
 		}
-	],
-	"PadelBot": {
-        "baseUrl": "https://ballejaune.com",
-        "daysBeforeBooking": 7,
-        "clubs": {
-            "myclub": 1234
-        },
-		"duration": 90,
-        "schedules": [
-            {
-                "name": "Padel 1",
-                "value": 67432
-            },
-            {
-                "name": "Padel 2",
-                "value": 56787
-            }
-        ],
-        "allowedTimes": ["17:00", "18:30", "20:00"],
-        "credentials": {
-            "myaccount" : {
-                "login": "me",
-                "password": "COUCOU7777"
-            }
-        }
-    }
+	]//,
+	// "PadelBot": {
+    //     "baseUrl": "https://ballejaune.com",
+    //     "daysBeforeBooking": 7,
+    //     "clubs": {
+    //         "myclub": 1234
+    //     },
+	// 	"duration": 90,
+    //     "schedules": [
+    //         {
+    //             "name": "Padel 1",
+    //             "value": 67432
+    //         },
+    //         {
+    //             "name": "Padel 2",
+    //             "value": 56787
+    //         }
+    //     ],
+    //     "allowedTimes": ["17:00", "18:30", "20:00"],
+    //     "credentials": {
+    //         "myaccount" : {
+    //             "login": "me",
+    //             "password": "COUCOU7777"
+    //         }
+    //     }
+    // }
 }

@@ -250,7 +250,7 @@ module PadelBot {
                 this.referrer = this.baseUrl+referrer;
             }
             // body = encodeURI(body);
-            Logger.info("Calling", this.baseUrl+url, method, body, this.currentCookies);
+            // Logger.debug("Calling", this.baseUrl+url, method, body, this.currentCookies);
             await this.sleep(300);
             let response = await fetch(this.baseUrl+url, {
                 "headers": {
@@ -410,9 +410,7 @@ module PadelBot {
             
             for (let schedule of this.schedules)
             {
-                let dateObj:any  = new Date(date);
-                let dataDiff:any = dateObj - Date.now();
-                let dateDiffInDays = Math.ceil(dataDiff / (1000 * 3600 * 24));
+                let dateDiffInDays = this.computeDateDiffInDays(date)
                 let csrf_reservation = await this.getTokenForSchedule(dateDiffInDays, timeInMinutes, schedule.value);
                 if (csrf_reservation != null)
                 {
@@ -430,24 +428,30 @@ module PadelBot {
             }
         }
 
+        private computeDateDiffInDays(requestedDate:string)
+        {
+            let localDateStr = new Date().toLocaleDateString();
+            let localDateObj = new Date(localDateStr + " UTC");
+
+            let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
+            let requestedDay = parseInt(requestedDate.split("-")[2]) + 30*parseInt(requestedDate.split("-")[1]) + 365*parseInt(requestedDate.split("-")[0]);
+            return requestedDay - localDay
+        }
+
         private async runBookPadelTask(iTask:any)
         {
             if (iTask.status == "pending")
             {
                 // Ckeck if we can start trying to book (reservation is opened 7 days before)
-                let localDateStr = new Date().toLocaleDateString();
-                let localDateObj = new Date(localDateStr + " UTC");
-
-                let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
-                let requestedDay = parseInt(iTask.date.split("-")[2]) + 30*parseInt(iTask.date.split("-")[1]) + 365*parseInt(iTask.date.split("-")[0]);
-                let daysDiff = requestedDay - localDay
+                
+                let daysDiff = this.computeDateDiffInDays(iTask.date)
                 // Logger.debug(`Local day: ${localDay}, Requested day: ${requestedDay}, Diff: ${daysDiff}`)
-                if (requestedDay < localDay)
+                if (daysDiff < 0)
                 {
                     iTask.status = "abandonned"
                     this.notifyTaskUpdate(iTask, `Abandonned as requested slot is in the past`, "#ff0000")
                 }
-                else if (requestedDay - localDay <= this.daysBeforeBooking)
+                else if (daysDiff <= this.daysBeforeBooking)
                 {
                     iTask.status = "trying"
                     this.notifyTaskUpdate(iTask, `Reservation should be opened, starting to try to book`)
