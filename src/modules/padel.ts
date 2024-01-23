@@ -17,7 +17,7 @@ module PadelBot {
             this.clubs = configData.clubs
             this.baseUrl = configData.baseUrl
 
-            this.startTaskDeamon()
+            this.runTaskDeamon()
 
             Logger.info("Padel Bot started")
             this.discordBot.sendMessage("Padel Bot just re-started, no task pending", {color:"#800080"})
@@ -251,7 +251,7 @@ module PadelBot {
             }
             // body = encodeURI(body);
             // Logger.debug("Calling", this.baseUrl+url, method, body, this.currentCookies);
-            await this.sleep(350);
+            await this.sleep(500);
             let response = await fetch(this.baseUrl+url, {
                 "headers": {
                 "accept": "*/*",
@@ -383,8 +383,16 @@ module PadelBot {
             }
             else
             {
-                Logger.warning("Unable to get CSRF", reply.data);
-                return null;
+                if (reply.data?.alert?.title == "Quota de réservation")
+                {
+                    Logger.info(`Unable to book slot, quota reached for this account`);
+                    return null;
+                }
+                else
+                {
+                    Logger.warning("Unable to get CSRF", reply.data);
+                    return null;
+                }
             }
         }
 
@@ -434,10 +442,6 @@ module PadelBot {
                     {
                         return true;
                     }
-                }
-                else
-                {
-                    Logger.info("No availabilty for requested date and time");
                 }
             }
         }
@@ -496,21 +500,25 @@ module PadelBot {
             }
         }
 
-        private async startTaskDeamon()
+        private async runTaskDeamon()
         {
-            let thisObj = this
-            Logger.info("Starting tasks deamon")
-            setInterval(async () => {
+            try
+            {
                 // Logger.debug(`Checking ${thisObj.tasks.length} tasks`)
-                for (let i in thisObj.tasks)
+                for (let i in this.tasks)
                 {
-                    let aTask = thisObj.tasks[i]
+                    let aTask = this.tasks[i]
                     if (aTask.type == "book-padel")
                     {
-                        thisObj.runBookPadelTask(aTask)
+                        await this.runBookPadelTask(aTask)
                     }
                 }
-            }, 3*1000);
+            }
+            catch (e)
+            {
+                Logger.error("runTaskDeamon exception:", e);
+            }
+            setTimeout(() => this.runTaskDeamon(), 3000)
         }
 
         discordBot:any;
