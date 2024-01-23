@@ -251,7 +251,7 @@ module PadelBot {
             }
             // body = encodeURI(body);
             // Logger.debug("Calling", this.baseUrl+url, method, body, this.currentCookies);
-            await this.sleep(300);
+            await this.sleep(350);
             let response = await fetch(this.baseUrl+url, {
                 "headers": {
                 "accept": "*/*",
@@ -306,7 +306,15 @@ module PadelBot {
             }
         }
 
-        private async login(clubid, user, password, csrf_auth_login = "")
+        private getCsrfToken(reply)
+        {
+            let handlers = reply.data?.handlers
+            let args = handlers ? handlers[0]?.args : null
+            let new_csrf_auth_login = args ? args[1] : null
+            return new_csrf_auth_login;
+        }
+
+        private async login(clubid, user, password, csrf_auth_login = "", canRetry = true)
         {
             let reply = await this.callBookingApi(
                 "/auth/login/from/club-home", 
@@ -320,13 +328,11 @@ module PadelBot {
             }
             if (reply.isJson && csrf_auth_login == "")
             {
-                let handlers = reply.data?.handlers
-                let args = handlers ? handlers[0]?.args : null
-                let new_csrf_auth_login = args ? args[1] : null
+                let new_csrf_auth_login = this.getCsrfToken(reply)
                 if (new_csrf_auth_login)
                 {
                     Logger.debug("Logging in with csrf_auth_login", new_csrf_auth_login);
-                    return this.login(clubid, user, password, new_csrf_auth_login);
+                    return this.login(clubid, user, password, new_csrf_auth_login, true);
                 }
                 else
                 {
@@ -341,6 +347,14 @@ module PadelBot {
             }
             else
             {
+                if (canRetry)
+                {
+                    let new_csrf_auth_login = this.getCsrfToken(reply)
+                    if (new_csrf_auth_login)
+                    {
+                        return this.login(clubid, user, password, new_csrf_auth_login, false);
+                    }
+                }
                 Logger.error("Error logging in: ", reply.data);
                 return false;
             }
@@ -459,7 +473,7 @@ module PadelBot {
             }
             if (iTask.status == "trying")
             {
-                if (iTask.tries >= 5)
+                if (iTask.tries >= 15)
                 {
                     iTask.status = "abandonned"
                     this.notifyTaskUpdate(iTask, `Abandonned after ${iTask.tries} tries`, "#ff0000")
@@ -496,7 +510,7 @@ module PadelBot {
                         thisObj.runBookPadelTask(aTask)
                     }
                 }
-            }, 5*1000);
+            }, 3*1000);
         }
 
         discordBot:any;
