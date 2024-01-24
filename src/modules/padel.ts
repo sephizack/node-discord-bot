@@ -361,7 +361,7 @@ module PadelBot {
         }
 
 
-        private async getTokenForSchedule(dateDiffInDays, time, schedule)
+        private async getTokenForSchedule(dateDiffInDays, time, schedule, loginUsed)
         {
             Logger.debug(`Checking availabilty for schedule ${schedule} with date ${dateDiffInDays} at ${time}`)
             let reply = await this.callBookingApi(
@@ -385,7 +385,8 @@ module PadelBot {
             {
                 if (reply.data?.alert?.title == "Quota de réservation")
                 {
-                    Logger.info(`Unable to book slot, quota reached for this account`);
+                    this.discordBot.sendMessage(`'${loginUsed}' is not able to book slot, quota reached for this account`, {color:"#ff0000"})
+                    Logger.info(`'${loginUsed}' is not able to book slot, quota reached for this account`);
                     return null;
                 }
                 else
@@ -411,6 +412,7 @@ module PadelBot {
             else if (reply.status == 200 && reply.isJson && reply.data.alert?.title)
             {
                 Logger.ok("Not possible to book slot:", reply.data.alert.title);
+                this.discordBot.sendMessage(`Not possible to book slot: ${reply.data.alert.title}`)
                 return false;
             }
             else
@@ -433,7 +435,7 @@ module PadelBot {
             for (let schedule of this.schedules)
             {
                 let dateDiffInDays = this.computeDateDiffInDays(date)
-                let csrf_reservation = await this.getTokenForSchedule(dateDiffInDays, timeInMinutes, schedule.value);
+                let csrf_reservation = await this.getTokenForSchedule(dateDiffInDays, timeInMinutes, schedule.value, credential.login);
                 if (csrf_reservation != null)
                 {
                     Logger.info(`Trying to book ${date} ${time} on schedule ${schedule.name} with token : ${csrf_reservation}`);
