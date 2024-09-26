@@ -36,6 +36,12 @@ module PadelBot {
 
             this.clubs = {}
             this.clubsFullNames = {}
+            let startUpAnnounceFields = [
+                {
+                    name: "Previous tasks lost",
+                    value: "Make sure to recreate them if needed"
+                }
+            ]
             for (let clubName in configData.clubs)
             {
                 Logger.info(`Loading club '${clubName}'`)
@@ -52,18 +58,22 @@ module PadelBot {
                     if (configClub.autoMonitor && configClub.autoMonitor.enabled)
                     {
                         this.autoMonitor(clubName, configClub.autoMonitor)
+                        startUpAnnounceFields.push({
+                            name: "Auto-monitoring started",
+                            value: `Running for ${clubName}`
+                        })
                     }
                 }
                 else
                 {
-                    Logger.error(`Unknown api type for club ${clubName}: ${configClub.apiType}`)
+                    Logger.error(`Unknown api type for club ${this.getClubFullName(clubName)}: ${configClub.apiType}`)
                 }
             }
 
             this.runTaskDeamon()
 
             Logger.info("Padel Bot started")
-            this.discordBot.sendMessage("Padel Bot just re-started, no task pending", {color:"#800080"})
+            this.notifyWithFields("Padel Bot started", "Announces", "#800080", startUpAnnounceFields)
             for (let clubName in this.clubs)
             {
                 this.listBookingsForClub(clubName)
@@ -73,37 +83,50 @@ module PadelBot {
         private autoMonitor(clubName: string, autoMonitor: any) {
             let clubsFullName = this.getClubFullName(clubName);
             Logger.info(`Starting auto-monitor for ${clubsFullName}`)
-            let clubBookingObject = this.clubs[clubName];
             let padelBot = this;
             new CronJob(
                 autoMonitor.runCrontime,
                 async function () {
                     Logger.info(`Running auto-monitor for ${clubsFullName}`)
-                    let targetDate = new Date()
-                    targetDate.setDate(targetDate.getDate() + autoMonitor.daysOffset)
-                    let targetDateStr = targetDate.toISOString().split('.')[0].split('T')[0]
-                    let availableSlots = await clubBookingObject.listAvailableSlots(
-                        targetDateStr,
-                        autoMonitor.targetTime,
-                        padelBot.getNextTime(autoMonitor.targetTime)
-                    );
-                    if (availableSlots == null)
+                    let availableSlots = []
+                    for (let dayOffset of autoMonitor.daysOffset)
                     {
-                        Logger.error(`Auto-monitor for ${clubsFullName} failed`)
-                        padelBot.notifyWithFields("Auto Monitoring "+clubsFullName, "Unexpected failure", "#ff0000", clubBookingObject.getLogs())
-                        return
+                        let newAvail = await padelBot.getAvailableSlots(clubName, autoMonitor, dayOffset);
+                        availableSlots.push(...newAvail)
                     }
                     if (availableSlots.length == 0)
                     {
-                        Logger.info(`No available slots for ${clubsFullName} at ${autoMonitor.targetTime} on ${targetDateStr}`)
+                        Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
                         return
                     }
+                    Logger.info(`Available slots found for ${clubsFullName}`, availableSlots)
                     padelBot.notifyWithFields("Auto Monitoring "+clubsFullName, "Available slots found that might interests you. Make sure you request for booking in case you want to proceed", "#00ff00", availableSlots);
                 },
                 null,
                 true,
                 'Europe/Paris'
             );
+        }
+
+        private async getAvailableSlots(clubName: string, autoMonitor: any, dayOffset: any) {
+            let clubsFullName = this.getClubFullName(clubName);
+            let clubBookingObject = this.clubs[clubName];
+
+            let targetDate = new Date()
+            targetDate.setDate(targetDate.getDate() + dayOffset)
+            let targetDateStr = targetDate.toISOString().split('.')[0].split('T')[0]
+            let availableSlots = await clubBookingObject.listAvailableSlots(
+                targetDateStr,
+                autoMonitor.targetTime,
+                this.getNextTime(autoMonitor.targetTime)
+            );
+            if (availableSlots == null)
+            {
+                Logger.error(`Auto-monitor for ${clubsFullName} failed`)
+                this.notifyWithFields("Auto Monitoring "+clubsFullName, "Unexpected failure", "#ff0000", clubBookingObject.getLogs())
+                return []
+            }
+            return availableSlots;
         }
 
         public handleAction(type:string, data: string) {
@@ -375,6 +398,8 @@ module PadelBot {
         {
             let fields = []
             let color = '#909090'
+            let highestLevel = 0
+            let status = "INFO"
             if (task)
             {
                 fields.push({
@@ -384,9 +409,23 @@ module PadelBot {
             }
             for (let log of logsArray)
             {
-                if (log.name.indexOf("ERROR") != -1)
+                if (highestLevel < 4 && log.name.indexOf("ERROR") != -1)
                 {
                     color = "#ff0000"
+                    highestLevel = 4
+                    status = "Error"
+                }
+                else if (highestLevel < 3 && log.name.indexOf("OK") != -1)
+                {
+                    color = '#00ff00'
+                    highestLevel = 3
+                    status = "OK"
+                }
+                else if (highestLevel < 2 && log.name.indexOf("NOTIFY") != -1)
+                {
+                    color = '#0099ff'
+                    highestLevel = 2
+                    status = "Notify"
                 }
                 fields.push({
                     name: log.name,
@@ -395,7 +434,7 @@ module PadelBot {
             }
             this.notifyWithFields(
                 "Execution logs",
-                `* ${logsArray.join("\n * ")}`,
+                `Global status: ${status}`,
                 color,
                 fields
             )
@@ -558,7 +597,7 @@ module PadelBot {
                     let isBooked = await this.tryBookingWithCred(this.clubId, this.credentials[credential], date, time)
                     if (isBooked)
                     {
-                        this.addLog("not", "Booked successfully with '"+credential+"' account")
+                        this.addLog("notify", "Booked successfully with '"+credential+"' account")
                         return TASK_EXEC_RESULT.DONE;
                     }
                 }
@@ -718,7 +757,7 @@ module PadelBot {
             {
                 if (reply.data?.alert?.title == "Quota de réservation")
                 {
-                    this.addLog("not", `'${loginUsed}' is not able to book slot, quota reached for this account`);
+                    this.addLog("notify", `'${loginUsed}' is not able to book slot, quota reached for this account`);
                     Logger.info(`'${loginUsed}' is not able to book slot, quota reached for this account`);
                     return null;
                 }
@@ -866,7 +905,7 @@ module PadelBot {
                 {
                     if (alreadyBookedFound)
                     {
-                        this.addLog("not", "Everything is booked, no need to try again");
+                        this.addLog("notify", "Everything is booked, no need to try again");
                         return [];
                     }
                     else
@@ -907,7 +946,7 @@ module PadelBot {
                 {
                     if (alreadyBookedFound)
                     {
-                        this.addLog("not", "Everything is booked, no need to try again");
+                        this.addLog("notify", "Everything is booked, no need to try again");
                         return TASK_EXEC_RESULT.ABORT;
                     }
                     else
@@ -1145,7 +1184,7 @@ module PadelBot {
                                     }
                                     else
                                     {
-                                        this.addLog("not", `Playground '${name}' is available at ${time}`);
+                                        this.addLog("notify", `Playground '${name}' is available at ${time}`);
                                         availableSlots.push({
                                             playgroundId: playGroundId,
                                             playground: name,
@@ -1168,7 +1207,7 @@ module PadelBot {
                                         
                     return null;
                 }
-                this.addLog("not", `Found ${availableSlots.length} available slots`);
+                this.addLog("notify", `Found ${availableSlots.length} available slots`);
                 // Logger.debug("Available slots", availableSlots);
                 return {availableSlots, alreadyBookedFound}
             }
