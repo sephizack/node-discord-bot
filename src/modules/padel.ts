@@ -1,5 +1,6 @@
 import Logger from './logger.js'
 import setCookie from 'set-cookie-parser'
+import { CronJob } from 'cron';
 
 
 module PadelBot {
@@ -48,6 +49,10 @@ module PadelBot {
                 {
                     this.clubs[clubName] = new DoinSportBooker(configClub)
                     this.clubsFullNames[clubName] = configClub.fullname
+                    if (configClub.autoMonitor && configClub.autoMonitor.enabled)
+                    {
+                        this.autoMonitor(clubName, configClub.autoMonitor)
+                    }
                 }
                 else
                 {
@@ -63,6 +68,42 @@ module PadelBot {
             {
                 this.listBookingsForClub(clubName)
             }
+        }
+        
+        private autoMonitor(clubName: string, autoMonitor: any) {
+            let clubsFullName = this.getClubFullName(clubName);
+            Logger.info(`Starting auto-monitor for ${clubsFullName}`)
+            let clubBookingObject = this.clubs[clubName];
+            let padelBot = this;
+            new CronJob(
+                autoMonitor.runCrontime,
+                async function () {
+                    Logger.info(`Running auto-monitor for ${clubsFullName}`)
+                    let targetDate = new Date()
+                    targetDate.setDate(targetDate.getDate() + autoMonitor.daysOffset)
+                    let targetDateStr = targetDate.toISOString().split('.')[0].split('T')[0]
+                    let availableSlots = await clubBookingObject.listAvailableSlots(
+                        targetDateStr,
+                        autoMonitor.targetTime,
+                        padelBot.getNextTime(autoMonitor.targetTime)
+                    );
+                    if (availableSlots == null)
+                    {
+                        Logger.error(`Auto-monitor for ${clubsFullName} failed`)
+                        padelBot.notifyWithFields("Auto Monitoring "+clubsFullName, "Unexpected failure", "#ff0000", clubBookingObject.getLogs())
+                        return
+                    }
+                    if (availableSlots.length == 0)
+                    {
+                        Logger.info(`No available slots for ${clubsFullName} at ${autoMonitor.targetTime} on ${targetDateStr}`)
+                        return
+                    }
+                    padelBot.notifyWithFields("Auto Monitoring "+clubsFullName, "Available slots found that might interests you. Make sure you request for booking in case you want to proceed", "#00ff00", availableSlots);
+                },
+                null,
+                true,
+                'Europe/Paris'
+            );
         }
 
         public handleAction(type:string, data: string) {
@@ -107,10 +148,10 @@ module PadelBot {
                                     name: "!task list-bookings <club-name>",
                                     value: "List bookings done club-name."
                                 },
-                                {
-                                    name: "!task monitor <club-name> 18:30",
-                                    value: "Monitor for last minute available slot at 18h30."
-                                },
+                                // {
+                                //     name: "!task monitor <club-name> 18:30",
+                                //     value: "Monitor for last minute available slot at 18h30."
+                                // },
                                 {
                                     name: "!rmtask i",
                                     value: "Remove task with index i"
@@ -232,7 +273,7 @@ module PadelBot {
                         status: "pending"
                     }
                 )
-                this.displayTasksList(`Task booking ${clubName} added successfully`, "#00ff00")
+                this.displayTasksList(`Task booking '${this.getClubFullName(clubName)}' created`, "#00ff00")
             }
             else if (taskType == "list-bookings")
             {
@@ -264,7 +305,7 @@ module PadelBot {
             let bookings = await clubBookingObject.listBookings()
             if (bookings == null)
             {
-                this.notifyWithFields("List bookings logs", "Unable to list bookings", "#ff0000", clubBookingObject.getLogs())
+                this.notifyWithFields("Existing bookings at "+this.getClubFullName(clubName), "Unable to list bookings", "#ff0000", clubBookingObject.getLogs())
                 return
             }
             let fields = []
@@ -275,7 +316,7 @@ module PadelBot {
                     value: booking.description
                 })
             }
-            this.notifyWithFields("Bookings for "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00ff00", fields)
+            this.notifyWithFields("Existing booking at "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00ff00", fields)
         }
 
         private getClubFullName(clubName: string)
@@ -293,7 +334,7 @@ module PadelBot {
             let text = "Uknown task type"
             if (task.type == "book")
             {
-                text = `At ${task.club} on ${task.date} from ${task.time} to ${this.getNextTime(task.time)} (api: ${this.clubs[task.club].apiType})`
+                text = `At ${this.getClubFullName(task.club)} on ${task.date} from ${task.time} to ${this.getNextTime(task.time)}`
             }
             if (task.status == "done")
             {
@@ -330,6 +371,36 @@ module PadelBot {
             )
         }
 
+        private notifyExecLogs(task:any, logsArray:any)
+        {
+            let fields = []
+            let color = '#909090'
+            if (task)
+            {
+                fields.push({
+                    name: "Task " + task.type,
+                    value: this.taskToString(task)
+                })
+            }
+            for (let log of logsArray)
+            {
+                if (log.name.indexOf("ERROR") != -1)
+                {
+                    color = "#ff0000"
+                }
+                fields.push({
+                    name: log.name,
+                    value: log.value
+                })
+            }
+            this.notifyWithFields(
+                "Execution logs",
+                `* ${logsArray.join("\n * ")}`,
+                color,
+                fields
+            )
+        }
+
         private displayTasksList(title:string = "Task list", color:string = null)
         {
             let fields = []
@@ -337,7 +408,7 @@ module PadelBot {
             {
                 let aTask = this.tasks[i]
                 fields.push({
-                    name: `Task ${i}: ${aTask.type}`,
+                    name: `Task ${i}: ${aTask.type} ${this.getClubFullName(aTask.club)}`,
                     value: this.taskToString(aTask)
                 })
             }
@@ -387,7 +458,7 @@ module PadelBot {
                     Logger.debug(`Trying to book on ${iTask.date} at ${iTask.time}`)
                     let clubBookingObject = this.clubs[iTask.club];
                     let isBooked = await clubBookingObject.tryBooking(iTask.date, iTask.time, this.getNextTime(iTask.time))
-                    this.notifyTaskMessage(iTask, `Execution logs: \n * ${clubBookingObject.getLogs().join("\n * ")}`, "#909090", "Task logs")
+                    this.notifyExecLogs(iTask, clubBookingObject.getLogs())
                     if (isBooked == TASK_EXEC_RESULT.DONE)
                     {
                         iTask.status = "done"
@@ -464,6 +535,12 @@ module PadelBot {
         }
 
         public async listBookings()
+        {
+            this.executionLogs = []
+            this.addLog("error", "Not yet implemented for BalleJaune API")
+        }
+
+        public async listAvailableSlots(date, time, endTime)
         {
             this.executionLogs = []
             this.addLog("error", "Not yet implemented for BalleJaune API")
@@ -758,50 +835,61 @@ module PadelBot {
 
         public async listBookings()
         {
-            this.executionLogs = []
-            let bearerToken = await this.login();
-            if (bearerToken == null)
-            {
-                return null;
-            }
-            return await this.getBookings(bearerToken);
-        }
-
-        private async getBookings(bearerToken: any) {
-            let url = `/clubs/bookings?activityType[]=sport&activityType[]=lesson&activityType[]=event&activityType[]=leisure&activityType[]=formula`
-            url += `&canceled=false&startAt[after]=${new Date().toISOString().split('.')[0]}&order[startAt]=ASC`
-            url += `&club.id[]=${this.clubId}&participants.user.id=${this.accountId}&itemsPerPage=10&page=1&confirmed=true`
-            let reply = await this.callApi(url, null, "GET", bearerToken);
-            if (reply.status != 200 || reply?.isJson == false)
-            {
-                this.addLog("error", "Error while retrieving bookings: "+reply.error);
-                Logger.error("Error while retrieving bookings", reply.error);
-                return null;
-            }
-            else
-            {
-                let bookingsOk = []
-                try {
-                    let bookings = reply.data["hydra:member"]
-                    for (let booking of bookings)
-                    {
-                        let startAt = booking["startAt"]
-                        let endAt = booking["endAt"]
-                        let playgroundName = booking["playgrounds"][0]["name"]
-                        bookingsOk.push({
-                            title: startAt.split('T')[0] + " on " + playgroundName,
-                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`
-                        })
-                    }
-                }
-                catch (e)
+            try {
+                this.executionLogs = []
+                let bearerToken = await this.login();
+                if (bearerToken == null)
                 {
-                    Logger.error("Error while parsing bookings", e);
-                    this.addLog("error", "Error while parsing bookings: "+e);
                     return null;
                 }
-                
-                return bookingsOk
+                return await this.getBookings(bearerToken);
+            }
+            catch (e)
+            {
+                Logger.error("Exception while listing bookings", e);
+                this.addLog("error", "Exception while listing bookings: "+e);
+                return null;
+            }
+        }
+
+        public async listAvailableSlots(date, time, endTime)
+        {
+            this.executionLogs = []
+            try {
+                let bearerToken = await this.login();
+                if (bearerToken == null)
+                {
+                    return null;
+                }
+                let {availableSlots, alreadyBookedFound} = await this.getAvailableSlots(date, time, endTime, bearerToken);
+                if (availableSlots == null || availableSlots.length == 0)
+                {
+                    if (alreadyBookedFound)
+                    {
+                        this.addLog("not", "Everything is booked, no need to try again");
+                        return [];
+                    }
+                    else
+                    {
+                        this.addLog("error", "No available slots found, but no booked slot found. This is unexpected");
+                        return null;
+                    }
+                }
+                let availableSlotsFileds = []
+                for (let slot of availableSlots)
+                {
+                    availableSlotsFileds.push({
+                        name: slot["day"] + " at " + slot["playground"],
+                        value: `From ${slot["startAt"]} to ${slot["endAt"]}`
+                    })
+                }
+                return availableSlotsFileds;
+            }
+            catch (e)
+            {
+                Logger.error("Exception while listing available slots", e);
+                this.addLog("error", "Exception while listing available slots: "+e);
+                return null;
             }
         }
 
@@ -853,6 +941,46 @@ module PadelBot {
                 return TASK_EXEC_RESULT.ABORT;
             }
         }
+
+        private async getBookings(bearerToken: any) {
+            let url = `/clubs/bookings?activityType[]=sport&activityType[]=lesson&activityType[]=event&activityType[]=leisure&activityType[]=formula`
+            url += `&canceled=false&startAt[after]=${new Date().toISOString().split('.')[0]}&order[startAt]=ASC`
+            url += `&club.id[]=${this.clubId}&participants.user.id=${this.accountId}&itemsPerPage=10&page=1&confirmed=true`
+            let reply = await this.callApi(url, null, "GET", bearerToken);
+            if (reply.status != 200 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error while retrieving bookings: "+reply.error);
+                Logger.error("Error while retrieving bookings", reply.error);
+                return null;
+            }
+            else
+            {
+                let bookingsOk = []
+                try {
+                    let bookings = reply.data["hydra:member"]
+                    for (let booking of bookings)
+                    {
+                        let startAt = booking["startAt"]
+                        let endAt = booking["endAt"]
+                        let playgroundName = booking["playgrounds"][0]["name"]
+                        bookingsOk.push({
+                            title: startAt.split('T')[0] + " on " + playgroundName,
+                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`
+                        })
+                    }
+                }
+                catch (e)
+                {
+                    Logger.error("Error while parsing bookings", e);
+                    this.addLog("error", "Error while parsing bookings: "+e);
+                    return null;
+                }
+                
+                return bookingsOk
+            }
+        }
+
+        
         
         private async confirmBooking(clubBooking: any, bearerToken: any) {
             try {
