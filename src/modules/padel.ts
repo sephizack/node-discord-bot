@@ -60,7 +60,7 @@ module PadelBot {
                         this.autoMonitor(clubName, configClub.autoMonitor)
                         startUpAnnounceFields.push({
                             name: "Auto-monitoring started",
-                            value: `Running for ${clubName}`
+                            value: `Running for ${this.getClubFullName(clubName)}`
                         })
                     }
                 }
@@ -484,7 +484,7 @@ module PadelBot {
             }
             if (iTask.status == "trying")
             {
-                if (iTask.tries >= 10)
+                if (iTask.tries >= 5)
                 {
                     iTask.status = "abandonned"
                     this.notifyTaskMessage(iTask, `Abandonned after ${iTask.tries} tries`, "#ff0000")
@@ -556,6 +556,7 @@ module PadelBot {
             this.clubId = config.clubId
             this.duration = 90
             this.executionLogs = []
+            this.currentCookies = {}
         }
 
         public getDaysBeforeBooking()
@@ -604,8 +605,9 @@ module PadelBot {
             }
             catch (e)
             {
-                Logger.error("Exception while trying to book", e);
-                this.addLog("error", "Exception while trying to book: "+e)
+                Logger.error("Unknown exception while trying to book", e);
+                this.addLog("error", "Unknown exception while trying to book: "+e)
+                return TASK_EXEC_RESULT.ABORT;
             }
             return TASK_EXEC_RESULT.RETRY;
         }
