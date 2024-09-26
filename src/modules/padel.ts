@@ -3,24 +3,66 @@ import setCookie from 'set-cookie-parser'
 
 
 module PadelBot {
+
+    const TASK_EXEC_RESULT = {
+        RETRY: 0,
+        DONE: 1,
+        ABORT: 2
+    }
+
+    function computeDateDiffInDays(requestedDate:string)
+    {
+        let localDateStr = new Date().toLocaleDateString();
+        let localDateObj = new Date(localDateStr + " UTC");
+
+        let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
+        let requestedDay = parseInt(requestedDate.split("-")[2]) + 30*parseInt(requestedDate.split("-")[1]) + 365*parseInt(requestedDate.split("-")[0]);
+        return requestedDay - localDay
+    }
+
+    function addLog(logs_arr:any, level:string, message:string)
+    {
+        logs_arr.push({
+            name: `${new Date().toISOString().split('.')[0].split('T')[1]} - ${level.toUpperCase()}`,
+            value: message
+        })
+    }
     export class PadelBot {
         public constructor(discordBot: any, configData:any) {
             this.discordBot = discordBot
             this.tasks = []
-            this.currentCookies = {}
-            this.referrer = ""
-            this.schedules = configData.schedules
-            this.credentials = configData.credentials
             this.allowedTimes = configData.allowedTimes
-            this.duration = configData.duration
-            this.daysBeforeBooking = configData.daysBeforeBooking
-            this.clubs = configData.clubs
-            this.baseUrl = configData.baseUrl
+
+            this.clubs = {}
+            this.clubsFullNames = {}
+            for (let clubName in configData.clubs)
+            {
+                Logger.info(`Loading club '${clubName}'`)
+                let configClub = configData.clubs[clubName]
+                if (configClub.apiType == "balleJaune")
+                {
+                    this.clubs[clubName] = new BalleJauneBooker(configClub)
+                    this.clubsFullNames[clubName] = configClub.fullname
+                }
+                else if (configClub.apiType == "allin")
+                {
+                    this.clubs[clubName] = new DoinSportBooker(configClub)
+                    this.clubsFullNames[clubName] = configClub.fullname
+                }
+                else
+                {
+                    Logger.error(`Unknown api type for club ${clubName}: ${configClub.apiType}`)
+                }
+            }
 
             this.runTaskDeamon()
 
             Logger.info("Padel Bot started")
             this.discordBot.sendMessage("Padel Bot just re-started, no task pending", {color:"#800080"})
+            for (let clubName in this.clubs)
+            {
+                this.listBookingsForClub(clubName)
+            }
         }
 
         public handleAction(type:string, data: string) {
@@ -58,8 +100,16 @@ module PadelBot {
                             title: "Help",
                             fields: [
                                 {
-                                    name: "!task book polygone 25MAR 18:30",
-                                    value: "Book a padel at 18h00 on 25th of March at Polygone"
+                                    name: "!task book <club-name> 25MAR 18:30",
+                                    value: "Book at 18h00 on 25th of March. Available clubs: "+Object.keys(this.clubs).join(', ')
+                                },
+                                {
+                                    name: "!task list-bookings <club-name>",
+                                    value: "List bookings done club-name."
+                                },
+                                {
+                                    name: "!task monitor <club-name> 18:30",
+                                    value: "Monitor for last minute available slot at 18h30."
                                 },
                                 {
                                     name: "!rmtask i",
@@ -152,10 +202,10 @@ module PadelBot {
                     return
                 }
 
-                let club = taskDataSplit[1]
-                if (!this.clubs[club])
+                let clubName = taskDataSplit[1];
+                if (!this.clubs[clubName])
                 {
-                    this.discordBot.sendMessage("Wrong club name. Allowed values: " + Object.keys(this.clubs).join(', ') , {color:"#ff0000"})
+                    this.discordBot.sendMessage(`Unknown club ${clubName}`, {color:"#ff0000"})
                     return
                 }
                 
@@ -173,15 +223,35 @@ module PadelBot {
 
                 this.tasks.push(
                     {
-                        type: "book-padel",
-                        club: club,
+                        type: "book",
+                        club: clubName,
                         date: date,
                         time: time,
+                        duration: 90,
                         tries: 0,
                         status: "pending"
                     }
                 )
-                this.displayTasksList("Task added successfully", "#00ff00")
+                this.displayTasksList(`Task booking ${clubName} added successfully`, "#00ff00")
+            }
+            else if (taskType == "list-bookings")
+            {
+                if (taskDataSplit.length != 2)
+                {
+                    this.discordBot.sendMessage(`Wrong format. Expecting 1 arguments, got ${taskDataSplit.length}`, {color:"#ff0000"})
+                    return
+                }
+                let clubName = taskDataSplit[1];
+                if (!this.clubs[clubName])
+                {
+                    this.discordBot.sendMessage(`Unknown club ${clubName}`, {color:"#ff0000"})
+                    return
+                }
+                this.listBookingsForClub(clubName)
+            }
+            else if (taskType == "monitor")
+            {
+                this.discordBot.sendMessage("Not yet implemented", {color:"#ff0000"})
             }
             else
             {
@@ -189,16 +259,41 @@ module PadelBot {
             }
         }
 
-        private async sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
+        private async listBookingsForClub(clubName: string) {
+            let clubBookingObject = this.clubs[clubName];
+            let bookings = await clubBookingObject.listBookings()
+            if (bookings == null)
+            {
+                this.notifyWithFields("List bookings logs", "Unable to list bookings", "#ff0000", clubBookingObject.getLogs())
+                return
+            }
+            let fields = []
+            for (let booking of bookings)
+            {
+                fields.push({
+                    name: booking.title,
+                    value: booking.description
+                })
+            }
+            this.notifyWithFields("Bookings for "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00ff00", fields)
+        }
+
+        private getClubFullName(clubName: string)
+        {
+            let fullname = this.clubsFullNames[clubName]
+            if (!fullname)
+            {
+                return clubName
+            }
+            return fullname
         }
 
         private taskToString(task:any)
         {
             let text = "Uknown task type"
-            if (task.type == "book-padel")
+            if (task.type == "book")
             {
-                text = `At ${task.club} on ${task.date} from ${task.time} to ${this.getNextTime(task.time)}`
+                text = `At ${task.club} on ${task.date} from ${task.time} to ${this.getNextTime(task.time)} (api: ${this.clubs[task.club].apiType})`
             }
             if (task.status == "done")
             {
@@ -211,18 +306,28 @@ module PadelBot {
             return text
         }
 
-        private notifyTaskUpdate(task:any, message:string, color:string = null)
+        private notifyWithFields(title:string, message:string, color:string = null, fields:any = null)
         {
             this.discordBot.sendMessage(message, {
-                title: "Task updated",
-                fields: [
+                title: title,
+                fields: fields,
+                color: color
+            })
+        }
+
+        private notifyTaskMessage(task:any, message:string, color:string = null, title:string = null, fields:any = null)
+        {
+            this.notifyWithFields(
+                title ? title : "Task updated",
+                message,
+                color,
+                [
                     {
                         name: "Task " + task.type,
                         value: this.taskToString(task)
                     }
-                ],
-                color: color
-            })
+                ]
+            )
         }
 
         private displayTasksList(title:string = "Task list", color:string = null)
@@ -243,16 +348,163 @@ module PadelBot {
             })
         }
 
+        private getDaysBeforeBookForTask(task:any)
+        {
+            return this.clubs[task.club].getDaysBeforeBooking();
+        }
+
+        private async runBookPadelTask(iTask:any)
+        {
+            if (iTask.status == "pending")
+            {
+                // Ckeck if we can start trying to book (reservation is opened 7 days before)
+                
+                let daysDiff = computeDateDiffInDays(iTask.date)
+                // Logger.debug(`Local day: ${localDay}, Requested day: ${requestedDay}, Diff: ${daysDiff}`)
+                if (daysDiff < 0)
+                {
+                    iTask.status = "abandonned"
+                    this.notifyTaskMessage(iTask, `Abandonned as requested slot is in the past`, "#ff0000")
+                }
+                else if (daysDiff <= this.getDaysBeforeBookForTask(iTask))
+                {
+                    iTask.status = "trying"
+                    this.notifyTaskMessage(iTask, `Reservation should be opened, starting to try to book`)
+                }
+            }
+            if (iTask.status == "trying")
+            {
+                if (iTask.tries >= 10)
+                {
+                    iTask.status = "abandonned"
+                    this.notifyTaskMessage(iTask, `Abandonned after ${iTask.tries} tries`, "#ff0000")
+                    return
+                }
+                
+                iTask.tries++
+                if (iTask.type == "book")
+                {
+                    Logger.debug(`Trying to book on ${iTask.date} at ${iTask.time}`)
+                    let clubBookingObject = this.clubs[iTask.club];
+                    let isBooked = await clubBookingObject.tryBooking(iTask.date, iTask.time, this.getNextTime(iTask.time))
+                    this.notifyTaskMessage(iTask, `Execution logs: \n * ${clubBookingObject.getLogs().join("\n * ")}`, "#909090", "Task logs")
+                    if (isBooked == TASK_EXEC_RESULT.DONE)
+                    {
+                        iTask.status = "done"
+                        iTask.result = "Booked successfully"
+                        this.notifyTaskMessage(iTask, `Booked successfully at '${iTask.club}' after ${iTask.tries} tries`, "#00ff00")
+                    }
+                    else if (isBooked == TASK_EXEC_RESULT.ABORT)
+                    {
+                        iTask.status = "abandonned"
+                        this.notifyTaskMessage(iTask, `Abandonned after ${iTask.tries} tries`, "#ff0000")
+                    }
+                }
+                else
+                {
+                    Logger.error("Unknown task type", iTask.api)
+                    iTask.status = "abandonned"
+                    this.notifyTaskMessage(iTask, `Unknown api ${iTask.api}`, "#ff0000")
+                }
+            }
+        }
+
+        private async runTaskDeamon()
+        {
+            try
+            {
+                // Logger.debug(`Checking ${thisObj.tasks.length} tasks`)
+                for (let i in this.tasks)
+                {
+                    let aTask = this.tasks[i]
+                    if (aTask.type == "book")
+                    {
+                        await this.runBookPadelTask(aTask)
+                    }
+                }
+            }
+            catch (e)
+            {
+                Logger.error("runTaskDeamon exception:", e);
+            }
+            setTimeout(() => this.runTaskDeamon(), 3000)
+        }
+
+        discordBot:any;
+        tasks:any;
+        clubs:any;
+        clubsFullNames:any;
+        allowedTimes:any;
+    }
+
+    class BalleJauneBooker {
+        public constructor(config:any) {
+            this.apiUrl = config.apiUrl
+            this.schedules = config.schedules
+            this.credentials = config.credentials
+            this.daysBeforeBooking = config.daysBeforeBooking
+            this.clubId = config.clubId
+            this.duration = 90
+            this.executionLogs = []
+        }
+
+        public getDaysBeforeBooking()
+        {
+            return this.daysBeforeBooking;
+        }
+
+        public getLogs()
+        {
+            return this.executionLogs
+        }
+
+        private addLog(level:string, message:string)
+        {
+            addLog(this.executionLogs, level, message)
+        }
+
+        public async listBookings()
+        {
+            this.executionLogs = []
+            this.addLog("error", "Not yet implemented for BalleJaune API")
+        }
+
+        public async tryBooking(date, time, endTime)
+        {
+            this.executionLogs = []
+            try {
+                this.endTime = endTime
+                for (let credential of Object.keys(this.credentials))
+                {
+                    this.addLog("info", `Trying to book with '${credential}' credentials`)
+                    Logger.debug(`Trying to book with '${credential}' credentials`)
+                    let isBooked = await this.tryBookingWithCred(this.clubId, this.credentials[credential], date, time)
+                    if (isBooked)
+                    {
+                        this.addLog("not", "Booked successfully with '"+credential+"' account")
+                        return TASK_EXEC_RESULT.DONE;
+                    }
+                }
+            }
+            catch (e)
+            {
+                Logger.error("Exception while trying to book", e);
+                this.addLog("error", "Exception while trying to book: "+e)
+            }
+            return TASK_EXEC_RESULT.RETRY;
+        }
+
+
         private async callBookingApi(url = '', body = "", method = 'POST', getCookies = false, referrer = "") 
         {
             if (referrer != "")
             {
-                this.referrer = this.baseUrl+referrer;
+                this.referrer = this.apiUrl+referrer;
             }
             // body = encodeURI(body);
-            // Logger.debug("Calling", this.baseUrl+url, method, body, this.currentCookies);
+            // Logger.debug("Calling", this.apiUrl+url, method, body, this.currentCookies);
             await this.sleep(500);
-            let response = await fetch(this.baseUrl+url, {
+            let response = await fetch(this.apiUrl+url, {
                 "headers": {
                 "accept": "*/*",
                 "accept-language": "en-US,en;q=0.9",
@@ -323,6 +575,7 @@ module PadelBot {
                 true)
             if (reply.status != 200)
             {
+                this.addLog("error", "Error logging in" + reply.error);
                 Logger.error("Error logging in", reply.error);
                 return false;
             }
@@ -343,6 +596,7 @@ module PadelBot {
             else if (reply.isJson && reply.data.success)
             {
                 Logger.ok("Logged in successfully !!!");
+                this.addLog("ok", "Logged in successfully !!!");
                 return true;
             }
             else
@@ -355,6 +609,7 @@ module PadelBot {
                         return this.login(clubid, user, password, new_csrf_auth_login, false);
                     }
                 }
+                this.addLog("error", "Error logging in: "+reply.data);
                 Logger.error("Error logging in: ", reply.data);
                 return false;
             }
@@ -374,6 +629,7 @@ module PadelBot {
             if (reply.status != 200)
             {
                 Logger.warning(`Error getting availabilty for schedule ${schedule}`, reply.error);
+                this.addLog("error", `Error getting availabilty for schedule ${schedule}`+ reply.error);
                 return null;
             }
             if (!reply.isJson)
@@ -385,12 +641,13 @@ module PadelBot {
             {
                 if (reply.data?.alert?.title == "Quota de réservation")
                 {
-                    this.discordBot.sendMessage(`'${loginUsed}' is not able to book slot, quota reached for this account`, {color:"#ff0000"})
+                    this.addLog("not", `'${loginUsed}' is not able to book slot, quota reached for this account`);
                     Logger.info(`'${loginUsed}' is not able to book slot, quota reached for this account`);
                     return null;
                 }
                 else
                 {
+                    this.addLog("error", "Unable to get CSRF" +reply.data);
                     Logger.warning("Unable to get CSRF", reply.data);
                     return null;
                 }
@@ -401,28 +658,30 @@ module PadelBot {
         {
             let reply = await this.callBookingApi(
                 "/reservation/process",
-                `action_type=create&choice=with_none&default_date=${date}&default_timestart=${time}&default_timeend=${this.getNextTime(time)}&default_duration=${this.duration}&default_schedule=${schedule}&default_row=0&poll_request_id=0&csrf_reservation=${csrf_reservation}`
+                `action_type=create&choice=with_none&default_date=${date}&default_timestart=${time}&default_timeend=${this.endTime}&default_duration=${this.duration}&default_schedule=${schedule}&default_row=0&poll_request_id=0&csrf_reservation=${csrf_reservation}`
             )
             
             if (reply.status == 200 && reply.isJson && reply.data.success)
             {
                 Logger.ok("Booked successfully !!!");
+                this.addLog("ok", "Booked successfully !!!");
                 return true;
             }
             else if (reply.status == 200 && reply.isJson && reply.data.alert?.title)
             {
                 Logger.ok("Not possible to book slot:", reply.data.alert.title);
-                this.discordBot.sendMessage(`Not possible to book slot: ${reply.data.alert.title}`)
+                this.addLog("error", `Not possible to book slot: ${reply.data.alert.title}`);
                 return false;
             }
             else
             {
+                this.addLog("error", "Unable to book slot" + reply.status + " " + reply.error + " " + reply.data);
                 Logger.error("Unable to book slot", reply.status, reply.error, reply.data);
                 return false;
             }
         }
 
-        private async tryBooking(clubid, credential, date, time)
+        private async tryBookingWithCred(clubid, credential, date, time)
         {
             let isLoggedIn = await this.login(clubid, credential.login, credential.password);
             if (!isLoggedIn)
@@ -434,7 +693,7 @@ module PadelBot {
             
             for (let schedule of this.schedules)
             {
-                let dateDiffInDays = this.computeDateDiffInDays(date)
+                let dateDiffInDays = computeDateDiffInDays(date)
                 let csrf_reservation = await this.getTokenForSchedule(dateDiffInDays, timeInMinutes, schedule.value, credential.login);
                 if (csrf_reservation != null)
                 {
@@ -448,92 +707,429 @@ module PadelBot {
             }
         }
 
-        private computeDateDiffInDays(requestedDate:string)
-        {
-            let localDateStr = new Date().toLocaleDateString();
-            let localDateObj = new Date(localDateStr + " UTC");
 
-            let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
-            let requestedDay = parseInt(requestedDate.split("-")[2]) + 30*parseInt(requestedDate.split("-")[1]) + 365*parseInt(requestedDate.split("-")[0]);
-            return requestedDay - localDay
+        private async sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        private async runBookPadelTask(iTask:any)
+
+        currentCookies:any;
+        referrer:string;
+        endTime:any;
+        
+        // Config
+        duration:any;
+        schedules:any;
+        credentials:any;
+        clubId:any;
+        apiUrl:string;
+        daysBeforeBooking:any;
+        executionLogs:any;
+    }
+
+    class DoinSportBooker {
+        public constructor(config:any) {
+            this.apiUrl = config.apiUrl
+            this.accountName = config.accountName
+            this.accountId = config.accountId
+            this.user = config.user
+            this.password = config.password
+            this.clubId = config.clubId
+            this.clubWhiteLabel = config.clubWhiteLabel
+            this.activityId = config.activityId
+            this.daysBeforeBooking = config.daysBeforeBooking
+            this.executionLogs = []
+        }
+
+        public getLogs()
         {
-            if (iTask.status == "pending")
+            return this.executionLogs
+        }
+
+        public getDaysBeforeBooking()
+        {
+            return this.daysBeforeBooking;
+        }
+
+        private addLog(level:string, message:string)
+        {
+            addLog(this.executionLogs, level, message)
+        }
+
+        public async listBookings()
+        {
+            this.executionLogs = []
+            let bearerToken = await this.login();
+            if (bearerToken == null)
             {
-                // Ckeck if we can start trying to book (reservation is opened 7 days before)
-                
-                let daysDiff = this.computeDateDiffInDays(iTask.date)
-                // Logger.debug(`Local day: ${localDay}, Requested day: ${requestedDay}, Diff: ${daysDiff}`)
-                if (daysDiff < 0)
-                {
-                    iTask.status = "abandonned"
-                    this.notifyTaskUpdate(iTask, `Abandonned as requested slot is in the past`, "#ff0000")
-                }
-                else if (daysDiff <= this.daysBeforeBooking)
-                {
-                    iTask.status = "trying"
-                    this.notifyTaskUpdate(iTask, `Reservation should be opened, starting to try to book`)
-                }
+                return null;
             }
-            if (iTask.status == "trying")
+            return await this.getBookings(bearerToken);
+        }
+
+        private async getBookings(bearerToken: any) {
+            let url = `/clubs/bookings?activityType[]=sport&activityType[]=lesson&activityType[]=event&activityType[]=leisure&activityType[]=formula`
+            url += `&canceled=false&startAt[after]=${new Date().toISOString().split('.')[0]}&order[startAt]=ASC`
+            url += `&club.id[]=${this.clubId}&participants.user.id=${this.accountId}&itemsPerPage=10&page=1&confirmed=true`
+            let reply = await this.callApi(url, null, "GET", bearerToken);
+            if (reply.status != 200 || reply?.isJson == false)
             {
-                if (iTask.tries >= 15)
-                {
-                    iTask.status = "abandonned"
-                    this.notifyTaskUpdate(iTask, `Abandonned after ${iTask.tries} tries`, "#ff0000")
-                    return
-                }
-                
-                iTask.tries++
-                for (let credential of Object.keys(this.credentials))
-                {
-                    Logger.debug(`Trying to book with '${credential}' credentials, for ${iTask.club} on ${iTask.date} at ${iTask.time}`)
-                    let isBooked = await this.tryBooking(this.clubs[iTask.club], this.credentials[credential], iTask.date, iTask.time)
-                    if (isBooked)
+                this.addLog("error", "Error while retrieving bookings: "+reply.error);
+                Logger.error("Error while retrieving bookings", reply.error);
+                return null;
+            }
+            else
+            {
+                let bookingsOk = []
+                try {
+                    let bookings = reply.data["hydra:member"]
+                    for (let booking of bookings)
                     {
-                        iTask.status = "done"
-                        iTask.result = "Booked with '"+credential+"' account"
-                        this.notifyTaskUpdate(iTask, `Booked successfully after ${iTask.tries} tries`, "#00ff00")
-                        break;
+                        let startAt = booking["startAt"]
+                        let endAt = booking["endAt"]
+                        let playgroundName = booking["playgrounds"][0]["name"]
+                        bookingsOk.push({
+                            title: startAt.split('T')[0] + " on " + playgroundName,
+                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`
+                        })
                     }
                 }
+                catch (e)
+                {
+                    Logger.error("Error while parsing bookings", e);
+                    this.addLog("error", "Error while parsing bookings: "+e);
+                    return null;
+                }
+                
+                return bookingsOk
             }
         }
 
-        private async runTaskDeamon()
+        public async tryBooking(date, time, endTime)
         {
-            try
-            {
-                // Logger.debug(`Checking ${thisObj.tasks.length} tasks`)
-                for (let i in this.tasks)
+            this.executionLogs = []
+            try {
+                let bearerToken = await this.login();
+                if (bearerToken == null)
                 {
-                    let aTask = this.tasks[i]
-                    if (aTask.type == "book-padel")
+                    return TASK_EXEC_RESULT.RETRY;
+                }
+                let {availableSlots, alreadyBookedFound} = await this.getAvailableSlots(date, time, endTime, bearerToken);
+                if (availableSlots == null || availableSlots.length == 0)
+                {
+                    if (alreadyBookedFound)
                     {
-                        await this.runBookPadelTask(aTask)
+                        this.addLog("not", "Everything is booked, no need to try again");
+                        return TASK_EXEC_RESULT.ABORT;
                     }
+                    else
+                    {
+                        return TASK_EXEC_RESULT.RETRY;
+                    }
+                }
+                let bestSlot = this.selectBestSlot(availableSlots);
+                if (bestSlot == null)
+                {
+                    return TASK_EXEC_RESULT.ABORT;
+                }
+                let clubBooking = await this.getClubBooking(bestSlot, bearerToken);
+                if (clubBooking == null)
+                {
+                    return TASK_EXEC_RESULT.ABORT;
+                }
+                if (await this.confirmBooking(clubBooking, bearerToken))
+                {
+                    return TASK_EXEC_RESULT.DONE;
+                }
+                else
+                {
+                    return TASK_EXEC_RESULT.ABORT;
                 }
             }
             catch (e)
             {
-                Logger.error("runTaskDeamon exception:", e);
+                Logger.error("Exception while trying to book", e);
+                this.addLog("error", "Exception while trying to book: "+e);
+                return TASK_EXEC_RESULT.ABORT;
             }
-            setTimeout(() => this.runTaskDeamon(), 3000)
+        }
+        
+        private async confirmBooking(clubBooking: any, bearerToken: any) {
+            try {
+                clubBooking.confirmed = true
+                clubBooking.club = "/clubs/"+this.clubId
+                clubBooking.activity = '/activities/'+this.activityId
+                clubBooking.playgrounds = [clubBooking.playgrounds[0]['@id']]
+                clubBooking.participants = [clubBooking.participants[0]['@id']]
+                clubBooking.timetableBlockPrice = clubBooking.timetableBlockPrice['@id']
+                clubBooking.userClient = clubBooking.userClient['@id']
+            }
+            catch (e)
+            {
+                Logger.error("Error while adapting ClubBooking object", e);
+                this.addLog("error", "Error while adapting ClubBooking object: "+e);
+            }
+
+            this.addLog("info", "Confirming booking ...");
+            let reply = await this.callApi(`/clubs/bookings/${clubBooking.id}`, clubBooking, "PUT", bearerToken);
+            if (reply.status != 200 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error confirming booking: "+reply.error);
+                Logger.error("Error confirming booking", reply.error);
+                return false;
+            }
+            else
+            {
+                if (reply.data.confirmed)
+                {
+                    this.addLog("ok", "Confirmed properly");
+                    return true
+                }
+                else
+                {
+                    this.addLog("error", "Server replied booking without confirmed state. Abort");
+                    Logger.error("Error confirming booking", reply.data);
+                    return false
+                }
+            }
+        }
+        
+        private async getClubBooking(bestSlot: any, bearerToken: any) {
+            this.addLog("info", `Preparing booking request for slot at ${bestSlot["playground"]} from ${bestSlot["startAt"]} to ${bestSlot["endAt"]} on ${bestSlot["day"]}`);
+            let reply = await this.callApi('/clubs/bookings', {
+                "timetableBlockPrice": "/clubs/playgrounds/timetables/blocks/prices/"+bestSlot["priceId"],
+                "activity": "/activities/"+this.activityId,
+                "canceled": false,
+                "club": "/clubs/"+this.clubId,
+                "startAt": `${bestSlot["day"]} ${bestSlot["startAt"]}`,
+                "payments": [],
+                "endAt": `${bestSlot["day"]} ${bestSlot["endAt"]}`,
+                "name": this.accountName,
+                "playgroundOptions": [],
+                "playgrounds": [
+                  "/clubs/playgrounds/"+bestSlot["playgroundId"]
+                ],
+                "maxParticipantsCountLimit": 4,
+                "userClient": "/user-clients/"+this.accountId,
+                "participants": [
+                  {
+                    "user": "/user-clients/"+this.accountId,
+                    "restToPay": 450,
+                    "bookingOwner": true
+                  }
+                ],
+                "pricePerParticipant": 450,
+                "paymentMethod": "on_the_spot",
+                "creationOrigin": "white_label_app"
+              }, "POST", bearerToken);
+            if (reply.status != 201 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error creating ClubBooking: "+reply.error);
+                Logger.error("Error ClubBooking", reply.error);
+                return null;
+            }
+            else
+            {
+                return reply.data
+            }
         }
 
-        discordBot:any;
-        tasks:any;
-        currentCookies:any;
-        referrer:string;
+        private selectBestSlot(availableSlots: any[]) {
+            let bestSlot = null
+            let bestSlotIdx = -1
+            let playgroundOrder = ['PADEL PISTE 2', 'PADEL PISTE 1', 'PADEL PISTE 4 "Cupra"', 'PADEL PISTE 3']
+            for (let slot of availableSlots)
+            {
+                let playground = slot["playground"]
+                let playgroundIdx = playgroundOrder.indexOf(playground)
+                if (playgroundIdx == -1)
+                {
+                    continue
+                }
+                if (bestSlot == null || playgroundIdx < bestSlotIdx)
+                {
+                    bestSlot = slot
+                    bestSlotIdx = playgroundIdx
+                }
+            }
+            if (bestSlot == null)
+            {
+                this.addLog("error", "No best slot decided among:" + availableSlots);
+                return null
+            }
+            this.addLog("ok", `Best slot is: ${bestSlot["playground"]} at ${bestSlot["startAt"]}`);
+            return bestSlot
+        }
+
+        private async getAvailableSlots(date: any, time: any, endTime: any, bearerToken: any)
+        {
+            let alreadyBookedFound = false;
+            let url = `/clubs/playgrounds/plannings/${date}`
+            url += `?club.id=${this.clubId}`
+            url += `&from=${time}:00`
+            url += `&to=22:29:00`
+            url += `&activities.id=${this.activityId}`
+            url += `&bookingType=unique`
+            let reply = await this.callApi(url, null, "GET", bearerToken);
+            if (reply.status != 200 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error while retrieving availabilities: "+reply.error);
+                Logger.error("Error while retrieving availabilities", reply.error);
+                return null;
+            }
+            else
+            {
+                let availableSlots = []
+                try {
+                    let playgrounds = reply.data["hydra:member"]
+                    for (let playground of playgrounds)
+                    {
+                        let playGroundId = playground["id"]
+                        let name = playground["name"]
+                        let activities = playground["activities"]
+                        for (let activity of activities)
+                        {
+                            if (activity["id"] != this.activityId)
+                            {
+                                continue
+                            }
+                            let slots = activity["slots"]
+                            for (let slot of slots)
+                            {
+                                let startAt = slot["startAt"]
+                                if (startAt != time)
+                                {
+                                    continue
+                                }
+                                let prices = slot["prices"]
+                                for (let price of prices)
+                                {
+                                    let id = price["id"]
+                                    let bookable = price["bookable"]
+                                    let duration = price["duration"]
+                                    if (duration !== 5400) // 90mins
+                                    {
+                                        continue
+                                    }
+                                    if (!bookable)
+                                    {
+                                        alreadyBookedFound = true
+                                    }
+                                    else
+                                    {
+                                        this.addLog("not", `Playground '${name}' is available at ${time}`);
+                                        availableSlots.push({
+                                            playgroundId: playGroundId,
+                                            playground: name,
+                                            day: date,
+                                            startAt: startAt+':00',
+                                            duration: duration,
+                                            endAt: endTime+':00',
+                                            priceId: id
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (e)
+                {
+                    Logger.error("Error while parsing available slots", e);
+                    this.addLog("error", "Error while parsing available slots: "+e);
+                                        
+                    return null;
+                }
+                this.addLog("not", `Found ${availableSlots.length} available slots`);
+                // Logger.debug("Available slots", availableSlots);
+                return {availableSlots, alreadyBookedFound}
+            }
+        }
+
+        private async login()
+        {
+            let reply = await this.callApi('/client_login_check', {
+                username: this.user,
+                password: this.password,
+                club: "/clubs/"+this.clubId,
+                clubWhiteLabel: "/clubs/white-labels/"+this.clubWhiteLabel,
+                origin: "white_label_app"
+            }, "POST");
+            if (reply.status != 200 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error logging in: "+reply.error);
+                Logger.error("Error logging in", reply.error);
+                return null;
+            }
+            else
+            {
+                this.addLog("ok", "Logged in successfully as " + this.user);
+                return reply.data.token
+            }
+        }
+
+        private async sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        private async callApi(url = '', body = {}, method = 'POST', bearerToken = "") 
+        {
+            await this.sleep(500);
+            // Logger.debug("Calling", this.apiUrl+url, method, body, bearerToken);
+            let response = await fetch(this.apiUrl+url, {
+                "headers": {
+                    "accept": "*/*",
+                    "accept-language": "en-US,en;q=0.9",
+                    "content-type": "application/json; charset=UTF-8",
+                    "sec-ch-ua": "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\"",
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": "\"macOS\"",
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-origin",
+                    "x-requested-with": "XMLHttpRequest",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
+                },
+                "body": body == null ? null : JSON.stringify(body),
+                "method": method
+            });
+            
+
+            let rawData:any = await response.text();
+            if (response.status != 200 && response.status != 201)
+            {
+                return {
+                    status: response.status,
+                    error: response.statusText + " - " + rawData,
+                    isJson: false
+                }
+            }
+            let isJson = false
+            try {
+                rawData = JSON.parse(rawData);
+                isJson = true;
+            }
+            catch (e) {
+                // Not json
+            }
+            return {
+                status: response.status,
+                isJson: isJson,
+                data: rawData
+            }
+        }
+
+        apiUrl:any;
+        accountId:any;
+        accountName:any;
+        user:any;
+        password:any;
+        clubId:any;
+        clubWhiteLabel:any;
         daysBeforeBooking:any;
-        schedules:any;
-        credentials:any;
-        allowedTimes:any;
-        duration:any;
-        clubs:any;
-        baseUrl:string;
+        activityId:any;
+        executionLogs:any;
     }
 }
 

@@ -31,6 +31,10 @@ function discordActionDispatcher(name, type, data)
             aPadelBot.handleAction(type, data)
         }
     }
+    else
+    {
+        Logger.warning("Discord bot not found")
+    }
 }
 
 // Initialize Discord clients
@@ -50,5 +54,9 @@ for (let discordSetup of config.get("DiscordsBots")) {
 }
 
 
+// setTimeout(() => {
+//     console.log("Sending fake message")
+//     discordActionDispatcher('AutoBookPadel', 'message', '!task list-bookings allin')
+// }, 5000)
 
 
