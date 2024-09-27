@@ -977,10 +977,15 @@ module PadelBot {
                 let availableSlotsFileds = []
                 for (let slot of availableSlots)
                 {
+                    if (slot["dayOfWeek"] == 6 || slot["dayOfWeek"] == 0)
+                    {
+                        Logger.info("Skipping weekend slot", slot);
+                        continue;
+                    }
                     availableSlotsFileds.push({
-                        name: slot["day"] + " at " + slot["playground"],
+                        name: slot["date"] + " at " + slot["playground"],
                         value: `From ${slot["startAt"]} to ${slot["endAt"]}`,
-                        date: slot["day"],
+                        date: slot["date"],
                         time: slot["startAt"]
                     })
                 }
@@ -1126,15 +1131,15 @@ module PadelBot {
         }
         
         private async getClubBooking(bestSlot: any, bearerToken: any) {
-            this.addLog("info", `Preparing booking request for slot at ${bestSlot["playground"]} from ${bestSlot["startAt"]} to ${bestSlot["endAt"]} on ${bestSlot["day"]}`);
+            this.addLog("info", `Preparing booking request for slot at ${bestSlot["playground"]} from ${bestSlot["startAt"]} to ${bestSlot["endAt"]} on ${bestSlot["date"]}`);
             let reply = await this.callApi('/clubs/bookings', {
                 "timetableBlockPrice": "/clubs/playgrounds/timetables/blocks/prices/"+bestSlot["priceId"],
                 "activity": "/activities/"+this.activityId,
                 "canceled": false,
                 "club": "/clubs/"+this.clubId,
-                "startAt": `${bestSlot["day"]} ${bestSlot["startAt"]}`,
+                "startAt": `${bestSlot["date"]} ${bestSlot["startAt"]}`,
                 "payments": [],
-                "endAt": `${bestSlot["day"]} ${bestSlot["endAt"]}`,
+                "endAt": `${bestSlot["date"]} ${bestSlot["endAt"]}`,
                 "name": this.accountName,
                 "playgroundOptions": [],
                 "playgrounds": [
@@ -1252,7 +1257,8 @@ module PadelBot {
                                         availableSlots.push({
                                             playgroundId: playGroundId,
                                             playground: name,
-                                            day: date,
+                                            dayOfWeek: new Date(`${date} ${startAt}`).getDay(),
+                                            date: date,
                                             startAt: startAt+':00',
                                             duration: duration,
                                             endAt: endTime+':00',
@@ -1312,7 +1318,7 @@ module PadelBot {
 
         private async callApi(url = '', body = {}, method = 'POST', bearerToken = "") 
         {
-            await this.sleep(500);
+            await this.sleep(1200);
             // Logger.debug("Calling", this.apiUrl+url, method, body, bearerToken);
             let response = await fetch(this.apiUrl+url, {
                 "headers": {
