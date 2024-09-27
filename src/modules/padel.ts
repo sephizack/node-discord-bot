@@ -59,8 +59,8 @@ module PadelBot {
                     {
                         this.autoMonitor(clubName, configClub.autoMonitor)
                         startUpAnnounceFields.push({
-                            name: "Auto-monitoring started",
-                            value: `Running for ${this.getClubFullName(clubName)}`
+                            name: `Auto-monitoring running for ${this.getClubFullName(clubName)}`,
+                            value: `Trying to find available slots at ${configClub.autoMonitor.targetTime}`
                         })
                     }
                 }
@@ -87,25 +87,83 @@ module PadelBot {
             new CronJob(
                 autoMonitor.runCrontime,
                 async function () {
-                    Logger.info(`Running auto-monitor for ${clubsFullName}`)
-                    let availableSlots = []
-                    for (let dayOffset of autoMonitor.daysOffset)
-                    {
-                        let newAvail = await padelBot.getAvailableSlots(clubName, autoMonitor, dayOffset);
-                        availableSlots.push(...newAvail)
-                    }
-                    if (availableSlots.length == 0)
-                    {
-                        Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
-                        return
-                    }
-                    Logger.info(`Available slots found for ${clubsFullName}`, availableSlots)
-                    padelBot.notifyWithFields("Auto Monitoring "+clubsFullName, "Available slots found that might interests you. Make sure you request for booking in case you want to proceed", "#00ff00", availableSlots);
+                    padelBot.handleAutoMonitorOccurence(clubName, autoMonitor);
                 },
                 null,
                 true,
                 'Europe/Paris'
             );
+        }
+
+        private async handleAutoMonitorOccurence(clubName: string, autoMonitor: any) {
+            let clubsFullName = this.getClubFullName(clubName);
+            let clubBookingObject = this.clubs[clubName];
+            Logger.info(`Running auto-monitor for ${clubsFullName}`)
+            let availableSlots = []
+            try {
+                for (let dayOffset of autoMonitor.daysOffset)
+                {
+                    let newAvail = await this.getAvailableSlots(clubName, autoMonitor, dayOffset);
+                    availableSlots.push(...newAvail)
+                }
+
+                let existingBookings = await clubBookingObject.listBookings()
+                if (existingBookings != null)
+                {
+                    let tomorrowDate = new Date()
+                    tomorrowDate.setDate(tomorrowDate.getDate() + 1)
+                    let tomorrowDateStr = tomorrowDate.toISOString().split('.')[0].split('T')[0];
+                    for (let existingBooking of existingBookings)
+                    {
+                        if (existingBooking.date == tomorrowDateStr)
+                        {
+                            // Remind existing booking + remove from available slots
+                            Logger.info(`Existing booking found for tomorrow at ${clubsFullName}`)
+                            this.notifyWithFields(clubsFullName + " reminder", "Don't forget your gear for tomorrow's session", "#ffee00", [
+                                {
+                                    name: existingBooking.title,
+                                    value: existingBooking.description
+                                }
+                            ])
+                            let newAvailableSlots = []
+                            for (let slot of availableSlots)
+                            {
+                                if (slot.date != tomorrowDateStr)
+                                {
+                                    Logger.info(`Keeping available slots on ${slot.date} as it differs from existing booking date ${tomorrowDateStr}`)
+                                    newAvailableSlots.push(slot)
+                                }
+                                else
+                                {
+                                    Logger.info(`Removing available slots on ${slot.date} as we have an existing booking`)
+                                }
+                            }
+                            availableSlots = newAvailableSlots
+                        }
+                    }
+                }
+                else
+                {
+                    Logger.error(`Auto-monitor for ${clubsFullName} failed`)
+                    this.notifyWithFields("Auto Monitoring "+clubsFullName, "Unable to list existing bookings", "#ff0000", clubBookingObject.getLogs())
+                    return
+                }
+            }
+            catch (e)
+            {
+                Logger.error(`Auto-monitor for ${clubsFullName} failed`, e)
+                this.notifyWithFields("Auto Monitoring "+clubsFullName, "Unexpected failure", "#ff0000", [{name: "Exception", value: e}])
+                return
+            }
+
+            if (availableSlots.length == 0)
+            {
+                Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
+                return
+            }
+
+            Logger.info(`${availableSlots.length} Available slots found for ${clubsFullName}`)
+            this.notifyWithFields("Available slots that might interests you at "+clubsFullName, "Make sure you request for booking to proceed", "#00ff00", availableSlots);
         }
 
         private async getAvailableSlots(clubName: string, autoMonitor: any, dayOffset: any) {
@@ -328,7 +386,7 @@ module PadelBot {
             let bookings = await clubBookingObject.listBookings()
             if (bookings == null)
             {
-                this.notifyWithFields("Existing bookings at "+this.getClubFullName(clubName), "Unable to list bookings", "#ff0000", clubBookingObject.getLogs())
+                this.notifyWithFields("Existing bookings at "+this.getClubFullName(clubName), "Unable to list bookings", "#ff9100", clubBookingObject.getLogs())
                 return
             }
             let fields = []
@@ -339,7 +397,7 @@ module PadelBot {
                     value: booking.description
                 })
             }
-            this.notifyWithFields("Existing booking at "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00ff00", fields)
+            this.notifyWithFields("Existing booking at "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00fbff", fields)
         }
 
         private getClubFullName(clubName: string)
@@ -921,7 +979,9 @@ module PadelBot {
                 {
                     availableSlotsFileds.push({
                         name: slot["day"] + " at " + slot["playground"],
-                        value: `From ${slot["startAt"]} to ${slot["endAt"]}`
+                        value: `From ${slot["startAt"]} to ${slot["endAt"]}`,
+                        date: slot["day"],
+                        time: slot["startAt"]
                     })
                 }
                 return availableSlotsFileds;
@@ -1006,7 +1066,9 @@ module PadelBot {
                         let playgroundName = booking["playgrounds"][0]["name"]
                         bookingsOk.push({
                             title: startAt.split('T')[0] + " on " + playgroundName,
-                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`
+                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`,
+                            date: startAt.split('T')[0],
+                            time: startAt.split('T')[1].split('+')[0]
                         })
                     }
                 }
@@ -1217,6 +1279,11 @@ module PadelBot {
 
         private async login()
         {
+            if (this.lastLoginDate && (Date.now() - this.lastLoginDate) < 1000*60*60){
+                this.addLog("notify", "Already logged in, re-use token");
+                Logger.info("Already logged in, re-use token");
+                return this.lastToken;
+            }
             let reply = await this.callApi('/client_login_check', {
                 username: this.user,
                 password: this.password,
@@ -1233,6 +1300,8 @@ module PadelBot {
             else
             {
                 this.addLog("ok", "Logged in successfully as " + this.user);
+                this.lastLoginDate = Date.now();
+                this.lastToken = reply.data.token;
                 return reply.data.token
             }
         }
@@ -1297,6 +1366,8 @@ module PadelBot {
         clubId:any;
         clubWhiteLabel:any;
         daysBeforeBooking:any;
+        lastLoginDate:any;
+        lastToken:any;
         activityId:any;
         executionLogs:any;
     }
