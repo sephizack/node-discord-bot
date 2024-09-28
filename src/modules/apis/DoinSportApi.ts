@@ -74,7 +74,7 @@ module apis {
                         continue;
                     }
                     availableSlotsFileds.push({
-                        name: slot["date"] + " at " + slot["playground"],
+                        name: Utils.getDayStringFromNumber(slot["dayOfWeek"]) + " " + slot["date"] + " at " + slot["playground"],
                         value: `From ${slot["startAt"]} to ${slot["endAt"]}`,
                         date: slot["date"],
                         time: slot["startAt"]
