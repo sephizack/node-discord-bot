@@ -1,6 +1,6 @@
 import Logger from './modules/logger.js'
 import DiscordBot from './modules/discord_bot.js'
-import PadelBot from './modules/padel.js'
+import BookingBot from './modules/bookingBot.js'
 
 import config from 'config';
 
@@ -12,23 +12,23 @@ if (!config.has("DiscordsBots")) {
     process.exit(1);
 }
 
-let aPadelBot = null;
+let aBookingBot = null;
 function discordActionDispatcher(name, type, data)
 {
     if (name == "AutoBookPadel")
     {
         if (type == "connected")
         {
-            aPadelBot = new PadelBot.PadelBot(allDiscordsBots["AutoBookPadel"], config.get("PadelBot"))
+            aBookingBot = new BookingBot.BookingBot(allDiscordsBots["AutoBookPadel"], config.get("BookingBot"))
         }
-        if (aPadelBot == null)
+        if (aBookingBot == null)
         {
             Logger.info("Discord bot not ready yet")
             return
         }
         if (type == "message")
         {
-            aPadelBot.handleAction(type, data)
+            aBookingBot.handleAction(type, data)
         }
     }
     else
