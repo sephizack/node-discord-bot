@@ -8,6 +8,21 @@ module apis {
         public abstract listAvailableSlots(date, time, endTime);
         public abstract tryBooking(date, time, endTime);
 
+		public constructor(config:any) {
+            this.fullname = config.fullname ? config.fullname : ""
+			this.address = config.address ? config.address : ""
+        }
+
+		public getFullname()
+		{
+			return this.fullname
+		}
+
+		public getAddress()
+		{
+			return this.address
+		}
+
         public getLogs()
         {
             return this.executionLogs
@@ -38,6 +53,8 @@ module apis {
 		}
 
 		private executionLogs = []
+		protected address: any;
+		protected fullname: any;
 	}
 }
 

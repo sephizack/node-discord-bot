@@ -13,7 +13,6 @@ module BookingBot {
             this.allowedTimes = configData.allowedTimes
 
             this.clubs = {}
-            this.clubsFullNames = {}
             let startUpAnnounceFields = [
                 {
                     name: "Previous tasks lost",
@@ -27,12 +26,10 @@ module BookingBot {
                 if (configClub.apiType == "balleJaune")
                 {
                     this.clubs[clubName] = new BalleJauneApi(configClub)
-                    this.clubsFullNames[clubName] = configClub.fullname
                 }
                 else if (configClub.apiType == "allin")
                 {
                     this.clubs[clubName] = new DoinSportApi(configClub)
-                    this.clubsFullNames[clubName] = configClub.fullname
                     if (configClub.autoMonitor && configClub.autoMonitor.enabled)
                     {
                         this.autoMonitor(clubName, configClub.autoMonitor)
@@ -372,15 +369,29 @@ module BookingBot {
             {
                 fields.push({
                     name: booking.title,
-                    value: booking.description
+                    value: booking.description + "\n" + this.generateAddToCalendarLink(clubBookingObject, booking)
                 })
             }
             this.notifyWithFields("Existing booking at "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00fbff", fields)
         }
 
+        private generateAddToCalendarLink(club:any, booking:any)
+        {
+            let url = 'https://calendar.google.com/calendar/render?action=TEMPLATE';
+            url += '&text=' + encodeURIComponent(`🎾 Padel ${club.getFullname()}`);
+            url += '&details=' + encodeURIComponent(`Terrain ${booking.playground} - ${booking.description}`);
+            url += '&dates=' + encodeURIComponent(booking.date.replace(/-/g,'') + 'T' + booking.time.replace(/:/g,'') + '')
+            url += '/' + encodeURIComponent(booking.endDate.replace(/-/g,'') + 'T' + booking.endTime.replace(/:/g,'') + '');
+            if (club.getAddress())
+            {
+                url += '&location=' + encodeURIComponent(club.getAddress());
+            }
+            return `[Add to Google Agenda](${url})`
+        }
+        
         private getClubFullName(clubName: string)
         {
-            let fullname = this.clubsFullNames[clubName]
+            let fullname = this.clubs[clubName].getFullname()
             if (!fullname)
             {
                 return clubName
@@ -539,6 +550,7 @@ module BookingBot {
                         iTask.status = "done"
                         iTask.result = "Booked successfully"
                         this.notifyTaskMessage(iTask, `Booked successfully at '${iTask.club}' after ${iTask.tries} tries`, "#00ff00")
+                        this.listBookingsForClub(iTask.club)
                     }
                     else if (isBooked == Utils.TASK_EXEC_RESULT.ABORT)
                     {
@@ -579,7 +591,6 @@ module BookingBot {
         discordBot:any;
         tasks:any;
         clubs:any;
-        clubsFullNames:any;
         allowedTimes:any;
     }
 }

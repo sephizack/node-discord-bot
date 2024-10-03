@@ -7,7 +7,7 @@ module apis {
 	export class BalleJauneApi extends BaseApi
     {
         public constructor(config:any) {
-            super()
+            super(config)
             this.apiUrl = config.apiUrl
             this.schedules = config.schedules
             this.credentials = config.credentials

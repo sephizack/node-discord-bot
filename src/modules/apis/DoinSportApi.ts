@@ -6,7 +6,7 @@ import setCookie from 'set-cookie-parser'
 module apis {
 	export class DoinSportApi extends BaseApi {
         public constructor(config:any) {
-            super()
+            super(config)
             this.apiUrl = config.apiUrl
             this.accountName = config.accountName
             this.accountId = config.accountId
@@ -164,7 +164,10 @@ module apis {
                             title: startAt.split('T')[0] + " on " + playgroundName,
                             description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`,
                             date: startAt.split('T')[0],
-                            time: startAt.split('T')[1].split('+')[0]
+                            time: startAt.split('T')[1].split('+')[0],
+                            endDate: endAt.split('T')[0],
+                            endTime: endAt.split('T')[1].split('+')[0],
+                            playground: playgroundName
                         })
                     }
                 }
@@ -405,7 +408,7 @@ module apis {
 
         private async callApi(url = '', body = {}, method = 'POST', bearerToken = "") 
         {
-            await this.sleep(1200);
+            await this.sleep(777);
             // Logger.debug("Calling", this.apiUrl+url, method, body, bearerToken);
             let response = await fetch(this.apiUrl+url, {
                 "headers": {
