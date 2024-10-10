@@ -11,6 +11,7 @@ module DiscordBot {
             this.client = new Discord.Client({
                 intents: [Discord.GatewayIntentBits.MessageContent
                         ,Discord.GatewayIntentBits.GuildMessages
+                        ,Discord.GatewayIntentBits.GuildMessageReactions
                         ,Discord.GatewayIntentBits.DirectMessages
                         ,Discord.GatewayIntentBits.GuildIntegrations
                         ,Discord.GatewayIntentBits.Guilds]
@@ -57,6 +58,9 @@ module DiscordBot {
             this.client.on(Discord.Events.MessageCreate, message => {
                 this.handleSpecialMessage(message)
             });
+            this.client.on(Discord.Events.MessageReactionAdd, (event, user) => {
+                this.handleReactionAddition(event, user)
+            });
         }
         
         public sendMessage(content:string, options:any = {}) {
@@ -98,6 +102,38 @@ module DiscordBot {
             }
             if (message.content.indexOf("!") == 0) {
                 this.userActionCallback("message", message.content)
+            }
+        }
+
+
+        private handleReactionAddition(event: any, user: any) {
+            try {
+                let messageFields = []
+                for (let aEmbed of event.message.embeds) {
+                    if (aEmbed.title && aEmbed.description)
+                    {
+                        messageFields.push({
+                            name: aEmbed.title,
+                            value: aEmbed.description
+                        })
+                    }
+                }
+
+                // Logger.debug(this.prefix(), "Reaction message", event.message.embeds)
+                this.userActionCallback("reaction", {
+                    message: {
+                        description : event.message.embeds[0].description,
+                        title: event.message.embeds[0].title,
+                        fields:  event.message.embeds[0].fields,
+                        color: event.message.embeds[0].color
+                    },
+                    reaction: {
+                        emoji: event._emoji.name,
+                        count: event.count
+                    }
+                })
+            } catch (error) {
+                Logger.error(this.prefix(), "Error handling reaction", error)
             }
         }
 

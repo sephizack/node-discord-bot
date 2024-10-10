@@ -2,15 +2,19 @@ import Logger from './logger.js'
 import Utils from './utils.js'
 import { CronJob } from 'cron';
 import BalleJauneApi from './apis/BalleJauneApi.js'
+import PostAction from './PostAction.js'
 import DoinSportApi from './apis/DoinSportApi.js'
+import BaseApi from './apis/BaseApi.js';
 
 
-module BookingBot {
+namespace BookingBot {
+    const _postActionPrefix = "Post Action "
     export class BookingBot {
         public constructor(discordBot: any, configData:any) {
             this.discordBot = discordBot
             this.tasks = []
             this.allowedTimes = configData.allowedTimes
+            this.postActionMap = new Map()
 
             this.clubs = {}
             let startUpAnnounceFields = [
@@ -94,12 +98,16 @@ module BookingBot {
                         {
                             // Remind existing booking + remove from available slots
                             Logger.info(`Existing booking found for tomorrow at ${clubsFullName}`)
-                            this.notifyWithFields(clubsFullName + " reminder", "Don't forget your gear for tomorrow's session", "#ffee00", [
-                                {
-                                    name: existingBooking.title,
-                                    value: existingBooking.description
-                                }
-                            ])
+                            let fields = []
+                            fields.push({
+                                name: existingBooking.title,
+                                value: existingBooking.description
+                            })
+                            this.addPostAction(fields, '❌', 1, "cancel reservation", () => {
+                                this.cancelBookingForDate(clubBookingObject, existingBooking)
+                            })
+
+                            this.notifyWithFields(clubsFullName + " reminder", "Don't forget your gear for tomorrow's session", "#ffee00", fields)
                             let newAvailableSlots = []
                             for (let slot of availableSlots)
                             {
@@ -138,7 +146,39 @@ module BookingBot {
             }
 
             Logger.info(`${availableSlots.length} Available slots found for ${clubsFullName}`)
-            this.notifyWithFields("Available slots that might interests you at "+clubsFullName, "Make sure you request for booking to proceed", "#00ff00", availableSlots);
+            let availableSlotsByDate = {}
+            for (let slot of availableSlots)
+            {
+                if (!availableSlotsByDate[slot.date])
+                {
+                    availableSlotsByDate[slot.date] = []
+                }
+                availableSlotsByDate[slot.date].push(slot)
+            }
+
+            for (let date in availableSlotsByDate)
+            {
+                let anySlotForDate = availableSlotsByDate[date][0]
+                let fields = []
+                fields.push({
+                    name: anySlotForDate.name,
+                    value: anySlotForDate.value
+                })
+                this.addPostAction(fields, '👍', 1, "book slot", () => {
+                    this.tasks.push(
+                        {
+                            type: "book",
+                            club: clubName,
+                            date: anySlotForDate.date,
+                            time: anySlotForDate.time,
+                            duration: 90,
+                            tries: 0,
+                            status: "pending"
+                        }
+                    )
+                })
+                this.notifyWithFields("Available slot that might interests you", `At ${clubsFullName}`, "#00ff00", fields);
+            }
         }
 
         private async getAvailableSlots(clubName: string, autoMonitor: any, dayOffset: any) {
@@ -162,7 +202,7 @@ module BookingBot {
             return availableSlots;
         }
 
-        public handleAction(type:string, data: string) {
+        public handleAction(type:string, data: any) {
             if (type == "message")
             {
                 try
@@ -225,6 +265,58 @@ module BookingBot {
                     this.discordBot.sendMessage("Error while analysing message"+e, {color:"#ff0000"})
                     Logger.error(e)
                 }  
+            }
+            else if (type == "reaction")
+            {
+                // Check if fields contains a post-action id 
+                let fields = data.message.fields ? data.message.fields : []
+                let postActionId = null
+                for (let aField of fields)
+                {
+                    if (aField.name.indexOf(_postActionPrefix) == 0)
+                    {
+                        try {
+                            postActionId = parseInt(aField.name.replace(_postActionPrefix, ""))
+                            break;
+                        }
+                        catch (e)
+                        {
+                            Logger.error("Error while parsing postActionId", e)
+                        }
+                    }
+                }
+
+                if (postActionId !== null)
+                {
+                    let postAction = this.postActionMap.get(postActionId)
+                    if (postAction)
+                    {
+                        this.handlePostActionReaction(postActionId, postAction, data.reaction)
+                    }
+                    else
+                    {
+                        Logger.error("Post action not found")
+                    }
+                }
+                
+            }
+        }
+
+        private addPostAction(fields: any[], emoji:string, count:number, description:string, postactionCallback:any) {
+            let postActionId = this.postActionMap.size+1
+            let postAction = new PostAction(description, emoji, count, postactionCallback)
+            this.postActionMap.set(postActionId, postAction)
+            fields.push({
+                name: _postActionPrefix+postActionId,
+                value: `React with ${count} ${emoji} to **${description}**`
+            })
+        }
+
+        private handlePostActionReaction(postActionId:number, postAction: PostAction, reaction: any) {
+            if (postAction.isConfirmed(reaction))
+            {
+                this.notifyWithFields(`Executing Post action ${postActionId}`, "", "#777777", [])
+                postAction.run()
             }
         }
 
@@ -346,10 +438,6 @@ module BookingBot {
                 }
                 this.listBookingsForClub(clubName)
             }
-            else if (taskType == "monitor")
-            {
-                this.discordBot.sendMessage("Not yet implemented", {color:"#ff0000"})
-            }
             else
             {
                 this.discordBot.sendMessage("Unknown task type", {color:"#ff0000"})
@@ -364,15 +452,36 @@ module BookingBot {
                 this.notifyWithFields("Existing bookings at "+this.getClubFullName(clubName), "Unable to list bookings", "#ff9100", clubBookingObject.getLogs())
                 return
             }
-            let fields = []
+            if (bookings.length == 0)
+            {
+                this.notifyWithFields("Existing bookings at "+this.getClubFullName(clubName), "No bookings found", "#cecb22", [])
+                return
+            }
+
             for (let booking of bookings)
             {
+                let fields = []
                 fields.push({
                     name: booking.title,
                     value: booking.description + "\n" + this.generateAddToCalendarLink(clubBookingObject, booking)
                 })
+                this.addPostAction(fields, '❌', 1, "cancel reservation", () => {
+                    this.cancelBookingForDate(clubBookingObject, booking)
+                })
+                this.notifyWithFields("Existing booking found", `At ${this.getClubFullName(clubName)}`, "#00fbff", fields)
             }
-            this.notifyWithFields("Existing booking at "+this.getClubFullName(clubName), `${bookings.length} bookings found`, "#00fbff", fields)
+        }
+
+        private async cancelBookingForDate(clubBookingObject: BaseApi, booking: any) {    
+            let isCanceled = await clubBookingObject.cancelBooking(booking);
+            if (isCanceled)
+            {
+                this.notifyWithFields("Booking canceled", `At ${clubBookingObject.getFullname()} on ${booking.date}`, "#00ff00", [])
+            }
+            else
+            {
+                this.notifyWithFields("Booking cancelation failed", `At ${clubBookingObject.getFullname()}`, "#ff0000", clubBookingObject.getLogs())
+            }
         }
 
         private generateAddToCalendarLink(club:any, booking:any)
@@ -592,6 +701,7 @@ module BookingBot {
         tasks:any;
         clubs:any;
         allowedTimes:any;
+        postActionMap:Map<number, PostAction>;
     }
 }
 

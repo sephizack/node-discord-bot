@@ -26,7 +26,7 @@ function discordActionDispatcher(name, type, data)
             Logger.info("Discord bot not ready yet")
             return
         }
-        if (type == "message")
+        if (type == "message" || type == "reaction")
         {
             aBookingBot.handleAction(type, data)
         }

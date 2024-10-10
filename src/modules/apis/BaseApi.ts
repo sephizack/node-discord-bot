@@ -1,12 +1,13 @@
 import Logger from '../logger.js'
 
 
-module apis {
+namespace apis {
 	export abstract class BaseApi {
 		public abstract getDaysBeforeBooking();
         public abstract listBookings();
         public abstract listAvailableSlots(date, time, endTime);
         public abstract tryBooking(date, time, endTime);
+		public abstract cancelBooking(booking);
 
 		public constructor(config:any) {
             this.fullname = config.fullname ? config.fullname : ""

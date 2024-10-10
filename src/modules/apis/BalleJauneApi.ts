@@ -3,7 +3,7 @@ import BaseApi from './BaseApi.js'
 import Utils from '../utils.js'
 import setCookie from 'set-cookie-parser'
 
-module apis {
+namespace apis {
 	export class BalleJauneApi extends BaseApi
     {
         public constructor(config:any) {
@@ -29,6 +29,12 @@ module apis {
         }
 
         public async listAvailableSlots(date, time, endTime)
+        {
+            this.resetLogs()
+            this.addLog("error", "Not yet implemented for BalleJaune API")
+        }
+
+        public async cancelBooking(booking)
         {
             this.resetLogs()
             this.addLog("error", "Not yet implemented for BalleJaune API")

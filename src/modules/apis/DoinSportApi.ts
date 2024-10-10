@@ -3,7 +3,7 @@ import BaseApi from './BaseApi.js'
 import Utils from '../utils.js'
 import setCookie from 'set-cookie-parser'
 
-module apis {
+namespace apis {
 	export class DoinSportApi extends BaseApi {
         public constructor(config:any) {
             super(config)
@@ -74,10 +74,11 @@ module apis {
                         continue;
                     }
                     availableSlotsFileds.push({
-                        name: Utils.getDayStringFromNumber(slot["dayOfWeek"]) + " " + slot["date"] + " at " + slot["playground"],
-                        value: `From ${slot["startAt"]} to ${slot["endAt"]}`,
+                        name: Utils.getDayStringFromNumber(slot["dayOfWeek"]) + " " + slot["date"],
+                        value: `From ${slot["startAt"].replace(":00:00", ":00").replace(":30:00", ":30")} to ${slot["endAt"].replace(":00:00", ":00").replace(":30:00", ":30")}`,
+                        playground: slot["playground"],
                         date: slot["date"],
-                        time: slot["startAt"]
+                        time: slot["startAt"].replace(":00:00", ":00").replace(":30:00", ":30")
                     })
                 }
                 return availableSlotsFileds;
@@ -86,6 +87,25 @@ module apis {
             {
                 Logger.error("Exception while listing available slots", e);
                 this.addLog("error", "Exception while listing available slots: "+e);
+                return null;
+            }
+        }
+
+        public async cancelBooking(booking)
+        {
+            this.resetLogs()
+            try {
+                let bearerToken = await this.login();
+                if (bearerToken == null)
+                {
+                    return null;
+                }
+                return await this.cancelBookingById(bearerToken, booking.id);
+            }
+            catch (e)
+            {
+                Logger.error("Exception while canceling booking", e);
+                this.addLog("error", "Exception while canceling booking: "+e);
                 return null;
             }
         }
@@ -139,6 +159,23 @@ module apis {
             }
         }
 
+        private async cancelBookingById(bearerToken: any, bookingId:string)
+        {
+            let url = `/clubs/bookings/${bookingId}`
+            Logger.info("Canceling booking url", url);
+            let reply = await this.callApi(url, {canceled: true}, "PUT", bearerToken);
+            if (reply.status != 200 || reply?.isJson == false)
+            {
+                this.addLog("error", "Error while canceling booking: "+reply.error);
+                Logger.error("Error while canceling booking", reply.error);
+                return false
+            }
+            else
+            {
+                return true
+            }
+        }
+
         private async getBookings(bearerToken: any) {
             let url = `/clubs/bookings?activityType[]=sport&activityType[]=lesson&activityType[]=event&activityType[]=leisure&activityType[]=formula`
             url += `&canceled=false&startAt[after]=${new Date().toISOString().split('.')[0]}&order[startAt]=ASC`
@@ -155,19 +192,22 @@ module apis {
                 let bookingsOk = []
                 try {
                     let bookings = reply.data["hydra:member"]
-                    for (let booking of bookings)
+                    for (let booking of bookings) // Object ClubBooking
                     {
                         let startAt = booking["startAt"]
                         let endAt = booking["endAt"]
+                        let startTime = startAt.split('T')[1].split('+')[0].replace(":00:00", ":00").replace(":30:00", ":30")
+                        let endTime = endAt.split('T')[1].split('+')[0].replace(":00:00", ":00").replace(":30:00", ":30")
                         let playgroundName = booking["playgrounds"][0]["name"]
                         bookingsOk.push({
                             title: startAt.split('T')[0] + " on " + playgroundName,
-                            description: `From ${startAt.split('T')[1].split('+')[0]} to ${endAt.split('T')[1].split('+')[0]}`,
+                            description: `From ${startTime} to ${endTime}`,
                             date: startAt.split('T')[0],
-                            time: startAt.split('T')[1].split('+')[0],
+                            time: startTime,
                             endDate: endAt.split('T')[0],
-                            endTime: endAt.split('T')[1].split('+')[0],
-                            playground: playgroundName
+                            endTime: endTime,
+                            playground: playgroundName,
+                            id: booking["id"]
                         })
                     }
                 }
