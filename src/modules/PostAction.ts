@@ -7,16 +7,22 @@ export class PostAction {
 		this.emoji = emoji
 		this.emojiCount = emojiCount
 		this.callback = callback
+		this.isExecuted = false
 	}
 
 	public isConfirmed(reaction: any) {
-        if (reaction.emoji == this.emoji && reaction.count == this.emojiCount) {
+		if (reaction.emoji == this.emoji && reaction.count == this.emojiCount) {
 			return true
 		}
 		return false
     }
 
 	public run() {
+		if (this.isExecuted) {
+			Logger.info("PostAction", "Action already executed, skipping")
+			return
+		}
+		this.isExecuted = true
 		this.callback()
 	}
 	
@@ -24,6 +30,7 @@ export class PostAction {
 	emoji:string;
 	emojiCount:number;
 	callback:any;
+	isExecuted:boolean;
 }
 
 export default PostAction

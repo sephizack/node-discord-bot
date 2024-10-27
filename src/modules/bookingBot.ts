@@ -107,20 +107,26 @@ namespace BookingBot {
                                 this.cancelBookingForDate(clubBookingObject, existingBooking)
                             })
 
-                            this.notifyWithFields(clubsFullName + " reminder", "Don't forget your gear for tomorrow's session", "#ffee00", fields)
-                            let newAvailableSlots = []
-                            for (let slot of availableSlots)
+                            this.notifyWithFields("🎾 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields)
+                        }
+                        // Remove already booked days
+                        let newAvailableSlots = []
+                        let didRemove = false
+                        for (let slot of availableSlots)
+                        {
+                            if (slot.date != existingBooking.date)
                             {
-                                if (slot.date != tomorrowDateStr)
-                                {
-                                    Logger.info(`Keeping available slots on ${slot.date} as it differs from existing booking date ${tomorrowDateStr}`)
-                                    newAvailableSlots.push(slot)
-                                }
-                                else
-                                {
-                                    Logger.info(`Removing available slots on ${slot.date} as we have an existing booking`)
-                                }
+                                Logger.info(`Keeping available slots on ${slot.date} as it differs from existing booking date ${tomorrowDateStr}`)
+                                newAvailableSlots.push(slot)
                             }
+                            else
+                            {
+                                didRemove = true
+                                Logger.info(`Removing available slots on ${slot.date} as we have an existing booking`)
+                            }
+                        }
+                        if (didRemove)
+                        {
                             availableSlots = newAvailableSlots
                         }
                     }
@@ -276,7 +282,7 @@ namespace BookingBot {
                     if (aField.name.indexOf(_postActionPrefix) == 0)
                     {
                         try {
-                            postActionId = parseInt(aField.name.replace(_postActionPrefix, ""))
+                            postActionId = aField.name.replace(_postActionPrefix, "")
                             break;
                         }
                         catch (e)
@@ -285,13 +291,19 @@ namespace BookingBot {
                         }
                     }
                 }
-
+                Logger.debug("Post action id found: ", postActionId)
                 if (postActionId !== null)
                 {
                     let postAction = this.postActionMap.get(postActionId)
                     if (postAction)
                     {
-                        this.handlePostActionReaction(postActionId, postAction, data.reaction)
+                        try {
+                            this.handlePostActionReaction(postActionId, postAction, data.reaction)
+                        }
+                        catch (e)
+                        {
+                            Logger.error("Error while handling post action in BOT", e)
+                        }
                     }
                     else
                     {
@@ -303,20 +315,32 @@ namespace BookingBot {
         }
 
         private addPostAction(fields: any[], emoji:string, count:number, description:string, postactionCallback:any) {
-            let postActionId = this.postActionMap.size+1
+            // Generate post action id as hash
+            let postActionId = Utils.getNewTokenForMap(this.postActionMap, 6)
             let postAction = new PostAction(description, emoji, count, postactionCallback)
             this.postActionMap.set(postActionId, postAction)
+            let countStr = ""
+            if (count > 1)
+            {
+                countStr = ` (${count} in total)`
+            }
             fields.push({
                 name: _postActionPrefix+postActionId,
-                value: `React with ${count} ${emoji} to **${description}**`
+                value: `React with ${emoji}${countStr} to **${description}**`
             })
         }
 
         private handlePostActionReaction(postActionId:number, postAction: PostAction, reaction: any) {
             if (postAction.isConfirmed(reaction))
             {
-                this.notifyWithFields(`Executing Post action ${postActionId}`, "", "#777777", [])
-                postAction.run()
+                this.notifyWithFields(`Executing Post action ${postActionId} ...`, `description: ${postAction.description}`, "#777777", [])
+                try {
+                    postAction.run()
+                }
+                catch (e)
+                {
+                    Logger.error("Error while running post action callback", e)
+                }
             }
         }
 
@@ -528,6 +552,14 @@ namespace BookingBot {
 
         private notifyWithFields(title:string, message:string, color:string = null, fields:any = null)
         {
+            if (!fields || fields.length == 0)
+            {
+                fields = null
+            }
+            if (message.length == 0)
+            {
+                message = " "
+            }
             this.discordBot.sendMessage(message, {
                 title: title,
                 fields: fields,
@@ -701,7 +733,7 @@ namespace BookingBot {
         tasks:any;
         clubs:any;
         allowedTimes:any;
-        postActionMap:Map<number, PostAction>;
+        postActionMap:Map<String, PostAction>;
     }
 }
 

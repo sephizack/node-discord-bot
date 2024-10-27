@@ -108,30 +108,27 @@ module DiscordBot {
 
         private handleReactionAddition(event: any, user: any) {
             try {
-                let messageFields = []
-                for (let aEmbed of event.message.embeds) {
-                    if (aEmbed.title && aEmbed.description)
-                    {
-                        messageFields.push({
-                            name: aEmbed.title,
-                            value: aEmbed.description
-                        })
-                    }
+                if (event.message.embeds.length == 0)
+                {
+                    Logger.info(this.prefix(), "handleReactionAddition: No embeds found in message", event.message)
+                    return
                 }
 
                 // Logger.debug(this.prefix(), "Reaction message", event.message.embeds)
-                this.userActionCallback("reaction", {
+                let reaction_callback_data = {
                     message: {
-                        description : event.message.embeds[0].description,
-                        title: event.message.embeds[0].title,
-                        fields:  event.message.embeds[0].fields,
-                        color: event.message.embeds[0].color
+                        description : event.message.embeds[0].data.description,
+                        title: event.message.embeds[0].data.title,
+                        fields:  event.message.embeds[0].data.fields,
+                        color: event.message.embeds[0].data.color
                     },
                     reaction: {
                         emoji: event._emoji.name,
                         count: event.count
                     }
-                })
+                }
+                Logger.debug(this.prefix(), "Reaction callback data", reaction_callback_data)
+                this.userActionCallback("reaction", reaction_callback_data)
             } catch (error) {
                 Logger.error(this.prefix(), "Error handling reaction", error)
             }

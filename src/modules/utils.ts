@@ -21,6 +21,26 @@ module Utils {
         DONE: 1,
         ABORT: 2
     }
+
+
+    export function getNewTokenForMap(map, size)
+    {
+        var ret = genRandStr(size);
+        while (map[ret]) ret = genRandStr(size);
+        return ret
+    }
+
+    function genRandStr(length)
+    {
+        var requestedLength = length ? length : 20;
+        var result           = '';
+        var characters       = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        var charactersLength = characters.length;
+        for (var i=0; i<requestedLength; i++) {
+            result += characters.charAt(Math.floor(Math.random() * charactersLength));
+        }
+        return result;
+    }
 }
 
 export default Utils
