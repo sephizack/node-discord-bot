@@ -103,8 +103,15 @@ namespace BookingBot {
                                 name: existingBooking.title,
                                 value: existingBooking.description
                             })
+                            
                             this.addPostAction(fields, '❌', 1, "cancel reservation", () => {
                                 this.cancelBookingForDate(clubBookingObject, existingBooking)
+                            })
+                            let nextWeekDay = new Date()
+                            nextWeekDay.setDate(nextWeekDay.getDate() + 8)
+                            let nextWeekDayStr = nextWeekDay.toISOString().split('.')[0].split('T')[0];
+                            this.addPostAction(fields, '👍', 1, `book the same slot for next week (${nextWeekDayStr} ${existingBooking.time})`, () => {
+                                this.createBookingTask(clubName, nextWeekDayStr, existingBooking.time);
                             })
 
                             this.notifyWithFields("🎾 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields)
@@ -331,7 +338,7 @@ namespace BookingBot {
         }
 
         private handlePostActionReaction(postActionId:number, postAction: PostAction, reaction: any) {
-            if (postAction.isConfirmed(reaction))
+            if (postAction.isConfirmed(reaction) && !postAction.isExecuted)
             {
                 this.notifyWithFields(`Executing Post action ${postActionId} ...`, `description: ${postAction.description}`, "#777777", [])
                 try {
@@ -434,18 +441,7 @@ namespace BookingBot {
                     return
                 }
 
-                this.tasks.push(
-                    {
-                        type: "book",
-                        club: clubName,
-                        date: date,
-                        time: time,
-                        duration: 90,
-                        tries: 0,
-                        status: "pending"
-                    }
-                )
-                this.displayTasksList(`Task booking '${this.getClubFullName(clubName)}' created`, "#00ff00")
+                this.createBookingTask(clubName, date, time);
             }
             else if (taskType == "list-bookings")
             {
@@ -466,6 +462,21 @@ namespace BookingBot {
             {
                 this.discordBot.sendMessage("Unknown task type", {color:"#ff0000"})
             }
+        }
+
+        private createBookingTask(clubName: string, date: string, time: string) {
+            this.tasks.push(
+                {
+                    type: "book",
+                    club: clubName,
+                    date: date,
+                    time: time,
+                    duration: 90,
+                    tries: 0,
+                    status: "pending"
+                }
+            );
+            this.displayTasksList(`Task booking '${this.getClubFullName(clubName)}' created`, "#00ff00");
         }
 
         private async listBookingsForClub(clubName: string) {
@@ -631,15 +642,21 @@ namespace BookingBot {
         private displayTasksList(title:string = "Task list", color:string = null)
         {
             let fields = []
+            let nb_tasks = 0
             for (let i = this.tasks.length-1; i>=0; i--)
             {
                 let aTask = this.tasks[i]
+                if (aTask.status == "done" || aTask.status == "abandonned")
+                {
+                    continue
+                }
+                nb_tasks++
                 fields.push({
                     name: `Task ${i}: ${aTask.type} ${this.getClubFullName(aTask.club)}`,
                     value: this.taskToString(aTask)
                 })
             }
-            this.discordBot.sendMessage(`${this.tasks.length} on-going tasks`, {
+            this.discordBot.sendMessage(`${nb_tasks} on-going tasks`, {
                 title: title,
                 fields: fields,
                 color: color

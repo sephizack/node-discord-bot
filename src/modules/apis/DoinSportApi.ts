@@ -201,7 +201,7 @@ namespace apis {
                         let playgroundName = booking["playgrounds"][0]["name"]
                         bookingsOk.push({
                             title: startAt.split('T')[0] + " on " + playgroundName,
-                            description: `From ${startTime} to ${endTime}`,
+                            description: `From ${startTime} to ${endTime} (GMT ?)`,
                             date: startAt.split('T')[0],
                             time: startTime,
                             endDate: endAt.split('T')[0],
@@ -266,14 +266,16 @@ namespace apis {
         
         private async getClubBooking(bestSlot: any, bearerToken: any) {
             this.addLog("info", `Preparing booking request for slot at ${bestSlot["playground"]} from ${bestSlot["startAt"]} to ${bestSlot["endAt"]} on ${bestSlot["date"]}`);
+            let startDateGMT = new Date(`${bestSlot["date"]} ${bestSlot["startAt"]}`).toISOString().split('.')[0].replace('T', ' ');
+            let endDateGMT = new Date(`${bestSlot["date"]} ${bestSlot["endAt"]}`).toISOString().split('.')[0].replace('T', ' ');
             let reply = await this.callApi('/clubs/bookings', {
                 "timetableBlockPrice": "/clubs/playgrounds/timetables/blocks/prices/"+bestSlot["priceId"],
                 "activity": "/activities/"+this.activityId,
                 "canceled": false,
                 "club": "/clubs/"+this.clubId,
-                "startAt": `${bestSlot["date"]} ${bestSlot["startAt"]}`,
+                "startAt": startDateGMT,
                 "payments": [],
-                "endAt": `${bestSlot["date"]} ${bestSlot["endAt"]}`,
+                "endAt": endDateGMT,
                 "name": this.accountName,
                 "playgroundOptions": [],
                 "playgrounds": [

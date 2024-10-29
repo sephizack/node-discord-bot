@@ -56,7 +56,7 @@ for (let discordSetup of config.get("DiscordsBots")) {
 
 // setTimeout(() => {
 //     console.log("Sending fake message")
-//     discordActionDispatcher('AutoBookPadel', 'message', '!task list-bookings allin')
+//     discordActionDispatcher('AutoBookPadel', 'message', '!task book allin 02NOV 18:30')
 // }, 5000)
 
 
