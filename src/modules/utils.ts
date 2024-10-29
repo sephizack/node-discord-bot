@@ -1,13 +1,14 @@
 module Utils {
     
-    export function computeDateDiffInDays(requestedDate:string)
+    export function computeDateDiffInDays(requestedDateStr :string)
     {
         let localDateStr = new Date().toISOString().split('T')[0];
         let localDateObj = new Date(localDateStr + " UTC");
 
-        let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
-        let requestedDay = parseInt(requestedDate.split("-")[2]) + 30*parseInt(requestedDate.split("-")[1]) + 365*parseInt(requestedDate.split("-")[0]);
-        return requestedDay - localDay
+        let requestedDate = new Date(requestedDateStr + " UTC");
+
+        let daysDiff = Math.floor((requestedDate.getTime() - localDateObj.getTime()) / (1000 * 60 * 60 * 24));
+        return daysDiff
     }
     
     const kDaysList = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
