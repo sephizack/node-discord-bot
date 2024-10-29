@@ -2,7 +2,7 @@ module Utils {
     
     export function computeDateDiffInDays(requestedDate:string)
     {
-        let localDateStr = new Date().toLocaleDateString();
+        let localDateStr = new Date().toISOString().split('T')[0];
         let localDateObj = new Date(localDateStr + " UTC");
 
         let localDay = localDateObj.getDate() + 30*(1+localDateObj.getMonth()) + 365*localDateObj.getFullYear();
