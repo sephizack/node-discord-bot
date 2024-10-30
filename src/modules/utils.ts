@@ -2,9 +2,9 @@ module Utils {
     
     export function computeDateDiffInDays(requestedDateStr :string)
     {
-        let localDateStr = new Date().toISOString().split('T')[0];
+        let d = new Date();
+        let localDateStr = d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
         let localDateObj = new Date(localDateStr + " UTC");
-
         let requestedDate = new Date(requestedDateStr + " UTC");
 
         let daysDiff = Math.floor((requestedDate.getTime() - localDateObj.getTime()) / (1000 * 60 * 60 * 24));
