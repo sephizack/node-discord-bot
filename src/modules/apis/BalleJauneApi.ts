@@ -1,6 +1,6 @@
 import Logger from '../logger.js'
 import BaseApi from './BaseApi.js'
-import Utils from '../utils.js'
+import Utils from '../../discord/utils.js'
 import setCookie from 'set-cookie-parser'
 
 namespace apis {

@@ -1,6 +1,7 @@
 import Logger from './modules/logger.js'
-import DiscordBot from './modules/discord_bot.js'
+import DiscordBot from './discord/discord_bot.js'
 import BookingBot from './modules/bookingBot.js'
+import ZtBot from './modules/ztBot.js'
 
 import config from 'config';
 
@@ -12,28 +13,49 @@ if (!config.has("DiscordsBots")) {
     process.exit(1);
 }
 
-let aBookingBot = null;
+function createUserBotForType(type, discordBot, config)
+{
+    switch (type)
+    {
+        case "booking":
+            return new BookingBot.BookingBot(discordBot, config)
+        case "zt":
+            return new ZtBot.ZtBot(discordBot, config)
+        default:
+            Logger.warning(`Type ${type} not supported`)
+            return null
+    }
+}
+
 function discordActionDispatcher(name, type, data)
 {
-    if (name == "AutoBookPadel")
+    let botConf = allDiscordsBots[name]
+    if (botConf == null)
     {
-        if (type == "connected")
+        Logger.warning(`Discord bot for ${name} not found`)
+        return
+    }
+
+    let userBot = botConf.userBot
+    if (type == "connected")
+    {
+        let userBotConf = config.get(botConf.connectsTo)
+        if (userBotConf == null)
         {
-            aBookingBot = new BookingBot.BookingBot(allDiscordsBots["AutoBookPadel"], config.get("BookingBot"))
-        }
-        if (aBookingBot == null)
-        {
-            Logger.info("Discord bot not ready yet")
+            Logger.warning(`User bot for ${botConf.connectsTo} not found`)
             return
         }
-        if (type == "message" || type == "reaction")
-        {
-            aBookingBot.handleAction(type, data)
-        }
+        let userBotType = userBotConf.botType
+        userBot = botConf.userBot = createUserBotForType(userBotType, botConf.discordBot, userBotConf)
     }
-    else
+    if (userBot == null)
     {
-        Logger.warning("Discord bot not found")
+        Logger.info("Discord bot not ready yet")
+        return
+    }
+    if (type != "connected")
+    {
+        userBot.handleAction(type, data)
     }
 }
 
@@ -50,7 +72,11 @@ for (let discordSetup of config.get("DiscordsBots")) {
             discordActionDispatcher(discordSetup.name, type, data)
         }
     )
-    allDiscordsBots[discordSetup.name] = aDiscordBot
+    allDiscordsBots[discordSetup.name] = {
+        discordBot: aDiscordBot,
+        connectsTo: discordSetup.connectsTo,
+        userBot: null
+    }
 }
 
 

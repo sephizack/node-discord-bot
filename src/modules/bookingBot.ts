@@ -1,8 +1,8 @@
 import Logger from './logger.js'
-import Utils from './utils.js'
+import Utils from '../discord/utils.js'
 import { CronJob } from 'cron';
 import BalleJauneApi from './apis/BalleJauneApi.js'
-import PostAction from './PostAction.js'
+import PostAction from '../discord/PostAction.js'
 import DoinSportApi from './apis/DoinSportApi.js'
 import BaseApi from './apis/BaseApi.js';
 
@@ -14,7 +14,8 @@ namespace BookingBot {
             this.discordBot = discordBot
             this.tasks = []
             this.allowedTimes = configData.allowedTimes
-            this.postActionMap = new Map()
+            this.blacklistesProposalDates = new Set()
+            this.autoMonitorConfig = {}
 
             this.clubs = {}
             let startUpAnnounceFields = [
@@ -36,6 +37,7 @@ namespace BookingBot {
                     this.clubs[clubName] = new DoinSportApi(configClub)
                     if (configClub.autoMonitor && configClub.autoMonitor.enabled)
                     {
+                        this.autoMonitorConfig[clubName] = configClub.autoMonitor
                         this.autoMonitor(clubName, configClub.autoMonitor)
                         startUpAnnounceFields.push({
                             name: `Auto-monitoring running for ${this.getClubFullName(clubName)}`,
@@ -52,11 +54,62 @@ namespace BookingBot {
             this.runTaskDeamon()
 
             Logger.info("Padel Bot started")
-            this.notifyWithFields("Padel Bot started", "Announces", "#800080", startUpAnnounceFields)
-            for (let clubName in this.clubs)
-            {
-                this.listBookingsForClub(clubName)
-            }
+            this.notifyWithFields("Padel Bot started", "Announces", "#800080", startUpAnnounceFields, this.getHelpButtons())
+        }
+
+        private getHelpButtons() {
+            return [
+                {
+                    label: "List Bookings",
+                    emoji: "🗓️",
+                    options: {
+                        announcement:false,
+                        executeOnlyOnce: false
+                    },
+                    callback: async () => {
+                        for (let clubName in this.clubs)
+                        {
+                            await this.listBookingsForClub(clubName)
+                        }
+                    }
+                },
+                {
+                    label: "Check Available Slots",
+                    emoji: "👟",
+                    options: {
+                        announcement:false,
+                        executeOnlyOnce: false
+                    },
+                    callback: async () => {
+                        let clubName = "allin"
+                        let autoMonitor = this.autoMonitorConfig[clubName]
+                        // this.notifyWithFields("Checking available slots", `At ${this.getClubFullName(clubName)} at ${autoMonitor.targetTime}`, "#009dff")
+                        await this.handleAutoMonitorOccurence(clubName, autoMonitor, true);
+                    }
+                },
+                {
+                    label: "Task list",
+                    emoji: "📋",
+                    options: {
+                        announcement:false,
+                        executeOnlyOnce: false
+                    },
+                    callback: () => {
+                        this.displayTasksList()
+                    }
+                },
+                {
+                    label: "Help",
+                    emoji: "❔",
+                    options: {
+                        announcement:false,
+                        executeOnlyOnce: false
+                    },
+                    callback: () => {
+                        this.displayHelp()
+                    }
+                },
+            ]
         }
         
         private autoMonitor(clubName: string, autoMonitor: any) {
@@ -74,7 +127,7 @@ namespace BookingBot {
             );
         }
 
-        private async handleAutoMonitorOccurence(clubName: string, autoMonitor: any) {
+        private async handleAutoMonitorOccurence(clubName: string, autoMonitor: any, tellWhenNoSlot = false) {
             let clubsFullName = this.getClubFullName(clubName);
             let clubBookingObject = this.clubs[clubName];
             Logger.info(`Running auto-monitor for ${clubsFullName}`)
@@ -103,18 +156,33 @@ namespace BookingBot {
                                 name: existingBooking.title,
                                 value: existingBooking.description
                             })
-                            
-                            this.addPostAction(fields, '❌', 1, "cancel reservation", () => {
-                                this.cancelBookingForDate(clubBookingObject, existingBooking)
-                            })
                             let nextWeekDay = new Date()
                             nextWeekDay.setDate(nextWeekDay.getDate() + 8)
                             let nextWeekDayStr = nextWeekDay.toISOString().split('.')[0].split('T')[0];
-                            this.addPostAction(fields, '👍', 1, `book the same slot for next week (${nextWeekDayStr} ${existingBooking.time})`, () => {
-                                this.createBookingTask(clubName, nextWeekDayStr, existingBooking.time);
-                            })
-
-                            this.notifyWithFields("🎾 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields)
+                            this.notifyWithFields("👟 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields, [
+                                {
+                                    label: `Re-book (on ${nextWeekDayStr})`,
+                                    emoji: "👟",
+                                    options: {
+                                        announcement: true
+                                    },
+                                    callback: () => {
+                                        this.createBookingTask(clubName, nextWeekDayStr, existingBooking.time);
+                                    }
+                                },
+                                {
+                                    label: "Cancel Reservation",
+                                    emoji: "🗑️",
+                                    options: {
+                                        needsConfirmation: true,
+                                        announcement: true,
+                                        executeOnlyOnce:true
+                                    },
+                                    callback: async () => {
+                                        await this.cancelBookingForDate(clubBookingObject, existingBooking)
+                                    }
+                                }
+                            ])
                         }
                         // Remove already booked days
                         let newAvailableSlots = []
@@ -152,16 +220,15 @@ namespace BookingBot {
                 return
             }
 
-            if (availableSlots.length == 0)
-            {
-                Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
-                return
-            }
-
             Logger.info(`${availableSlots.length} Available slots found for ${clubsFullName}`)
             let availableSlotsByDate = {}
             for (let slot of availableSlots)
             {
+                if (this.blacklistesProposalDates.has(slot.date))
+                {
+                    Logger.info(`Blacklisted proposal for ${slot.date}`)
+                    continue
+                }
                 if (!availableSlotsByDate[slot.date])
                 {
                     availableSlotsByDate[slot.date] = []
@@ -169,6 +236,16 @@ namespace BookingBot {
                 availableSlotsByDate[slot.date].push(slot)
             }
 
+            if (Object.keys(availableSlotsByDate).length == 0)
+            {
+                Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
+                if (tellWhenNoSlot)
+                {
+                    this.notifyWithFields("No slots found", `At ${clubsFullName} at ${autoMonitor.targetTime}`, "#ff0000")
+                }
+                return
+            }
+    
             for (let date in availableSlotsByDate)
             {
                 let anySlotForDate = availableSlotsByDate[date][0]
@@ -177,20 +254,30 @@ namespace BookingBot {
                     name: anySlotForDate.name,
                     value: anySlotForDate.value
                 })
-                this.addPostAction(fields, '👍', 1, "book slot", () => {
-                    this.tasks.push(
-                        {
-                            type: "book",
-                            club: clubName,
-                            date: anySlotForDate.date,
-                            time: anySlotForDate.time,
-                            duration: 90,
-                            tries: 0,
-                            status: "pending"
+                this.notifyWithFields("Available slot that might interests you", `At ${clubsFullName}`, "#00ff00", fields, [
+                    {
+                        label: `Book`,
+                        emoji: "👟",
+                        options: {
+                            announcement: true
+                        },
+                        callback: () => {
+                            this.createBookingTask(clubName, anySlotForDate.date, anySlotForDate.time);
                         }
-                    )
-                })
-                this.notifyWithFields("Available slot that might interests you", `At ${clubsFullName}`, "#00ff00", fields);
+                    },
+                    {
+                        label: `Blacklist ${anySlotForDate.date}`,
+                        emoji: "🏴",
+                        options: {
+                            needsConfirmation: true
+                        },
+                        callback: () => {
+                            this.blacklistesProposalDates.add(anySlotForDate.date)
+                            Logger.info(`Blacklisted next proposals for ${anySlotForDate.date}`)
+                            this.notifyWithFields("Blacklisted date", `No more proposals for ${anySlotForDate.date}`, "#00ff00")
+                        }
+                    }
+                ]);
             }
         }
 
@@ -216,6 +303,11 @@ namespace BookingBot {
         }
 
         public handleAction(type:string, data: any) {
+            if (type == "mention")
+            {
+                type = "message"
+                data = '!task ' + data
+            }
             if (type == "message")
             {
                 try
@@ -246,31 +338,7 @@ namespace BookingBot {
                     }
                     if (data.indexOf("!help") == 0)
                     {
-                        this.discordBot.sendMessage(`Sample of possible instructions\nAvailable clubs: ${Object.keys(this.clubs).join(', ')}`, {
-                            title: "Help",
-                            fields: [
-                                {
-                                    name: "!task book <club-name> 25MAR 18:30",
-                                    value: "Book at 18h00 on 25th of March."
-                                },
-                                {
-                                    name: "!task list-bookings <club-name>",
-                                    value: "List bookings done club-name."
-                                },
-                                // {
-                                //     name: "!task monitor <club-name> 18:30",
-                                //     value: "Monitor for last minute available slot at 18h30."
-                                // },
-                                {
-                                    name: "!rmtask i",
-                                    value: "Remove task with index i"
-                                },
-                                {
-                                    name: "!tasklist",
-                                    value: "List all tasks"
-                                }
-                            ]
-                        })
+                        this.displayHelp()
                     }
                 }
                 catch (e)
@@ -281,74 +349,37 @@ namespace BookingBot {
             }
             else if (type == "reaction")
             {
-                // Check if fields contains a post-action id 
-                let fields = data.message.fields ? data.message.fields : []
-                let postActionId = null
-                for (let aField of fields)
-                {
-                    if (aField.name.indexOf(_postActionPrefix) == 0)
-                    {
-                        try {
-                            postActionId = aField.name.replace(_postActionPrefix, "")
-                            break;
-                        }
-                        catch (e)
-                        {
-                            Logger.error("Error while parsing postActionId", e)
-                        }
-                    }
-                }
-                Logger.debug("Post action id found: ", postActionId)
-                if (postActionId !== null)
-                {
-                    let postAction = this.postActionMap.get(postActionId)
-                    if (postAction)
-                    {
-                        try {
-                            this.handlePostActionReaction(postActionId, postAction, data.reaction)
-                        }
-                        catch (e)
-                        {
-                            Logger.error("Error while handling post action in BOT", e)
-                        }
-                    }
-                    else
-                    {
-                        Logger.error("Post action not found")
-                    }
-                }
-                
+                // Nothing to-do
             }
         }
 
-        private addPostAction(fields: any[], emoji:string, count:number, description:string, postactionCallback:any) {
-            // Generate post action id as hash
-            let postActionId = Utils.getNewTokenForMap(this.postActionMap, 6)
-            let postAction = new PostAction(description, emoji, count, postactionCallback)
-            this.postActionMap.set(postActionId, postAction)
-            let countStr = ""
-            if (count > 1)
-            {
-                countStr = ` (${count} in total)`
-            }
-            fields.push({
-                name: _postActionPrefix+postActionId,
-                value: `React with ${emoji}${countStr} to **${description}**`
+        private displayHelp() {
+            this.discordBot.sendMessage(`Sample of possible instructions\nAvailable clubs: ${Object.keys(this.clubs).join(', ')}`, {
+                title: "Help",
+                fields: [
+                    {
+                        name: "!task book <club-name> 25MAR 18:30",
+                        value: "Book at 18h00 on 25th of March."
+                    },
+                    {
+                        name: "!task book 25MAR",
+                        value: "Book with default All-in and 18:30."
+                    },
+                    {
+                        name: "!task list-bookings <club-name>",
+                        value: "List bookings done club-name."
+                    },
+                    {
+                        name: "!rmtask i",
+                        value: "Remove task with index i"
+                    },
+                    {
+                        name: "!tasklist",
+                        value: "List all tasks"
+                    }
+                ],
+                buttons: this.getHelpButtons()
             })
-        }
-
-        private handlePostActionReaction(postActionId:number, postAction: PostAction, reaction: any) {
-            if (postAction.isConfirmed(reaction) && !postAction.isExecuted)
-            {
-                this.notifyWithFields(`Executing Post action ${postActionId} ...`, `description: ${postAction.description}`, "#777777", [])
-                try {
-                    postAction.run()
-                }
-                catch (e)
-                {
-                    Logger.error("Error while running post action callback", e)
-                }
-            }
         }
 
         private getCleanedTime(time:string)
@@ -380,6 +411,10 @@ namespace BookingBot {
         private getCleanedDate(rawDate:string)
         {
             let dateStr = null;
+            if (rawDate.length == 4)
+            {
+                rawDate = '0'+rawDate
+            }
             if (rawDate.length == 5)
             {
                 dateStr = rawDate+""+(new Date().getFullYear());
@@ -416,6 +451,10 @@ namespace BookingBot {
             let taskType = taskDataSplit[0]
             if (taskType == "book")
             {
+                if (taskDataSplit.length == 2)
+                {
+                    taskDataSplit = ["book", "allin", taskDataSplit[1], "18:30"]
+                }
                 if (taskDataSplit.length != 4)
                 {
                     this.discordBot.sendMessage(`Wrong task format. Expecting 4 arguments, got ${taskDataSplit.length}`, {color:"#ff0000"})
@@ -461,6 +500,7 @@ namespace BookingBot {
             else
             {
                 this.discordBot.sendMessage("Unknown task type", {color:"#ff0000"})
+                this.displayHelp()
             }
         }
 
@@ -498,12 +538,26 @@ namespace BookingBot {
                 let fields = []
                 fields.push({
                     name: booking.title,
-                    value: booking.description + "\n" + this.generateAddToCalendarLink(clubBookingObject, booking)
+                    value: booking.description
                 })
-                this.addPostAction(fields, '❌', 1, "cancel reservation", () => {
-                    this.cancelBookingForDate(clubBookingObject, booking)
-                })
-                this.notifyWithFields("Existing booking found", `At ${this.getClubFullName(clubName)}`, "#00fbff", fields)
+                this.notifyWithFields(`Existing booking on ${booking.date}`, `At ${this.getClubFullName(clubName)}`, "#00fbff", fields, [
+                    {
+                        label: "Add to Google Agenda",
+                        emoji: "🗓️",
+                        url: this.generateAddToCalendarLink(clubBookingObject, booking)
+                    },
+                    {
+                        label: "Cancel Reservation",
+                        emoji: "🗑️",
+                        options: {
+                            announcement: true,
+                            needsConfirmation: true,
+                        },
+                        callback: async () => {
+                            await this.cancelBookingForDate(clubBookingObject, booking)
+                        }
+                    }
+                ])
             }
         }
 
@@ -530,7 +584,7 @@ namespace BookingBot {
             {
                 url += '&location=' + encodeURIComponent(club.getAddress());
             }
-            return `[Add to Google Agenda](${url})`
+            return url;
         }
         
         private getClubFullName(clubName: string)
@@ -561,7 +615,7 @@ namespace BookingBot {
             return text
         }
 
-        private notifyWithFields(title:string, message:string, color:string = null, fields:any = null)
+        private notifyWithFields(title:string, message:string, color:string = null, fields:any = null, buttons:any = null)
         {
             if (!fields || fields.length == 0)
             {
@@ -574,7 +628,8 @@ namespace BookingBot {
             this.discordBot.sendMessage(message, {
                 title: title,
                 fields: fields,
-                color: color
+                color: color,
+                buttons: buttons
             })
         }
 
@@ -750,7 +805,8 @@ namespace BookingBot {
         tasks:any;
         clubs:any;
         allowedTimes:any;
-        postActionMap:Map<String, PostAction>;
+        blacklistesProposalDates:Set<String>;
+        autoMonitorConfig:any;
     }
 }
 

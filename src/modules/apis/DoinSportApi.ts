@@ -1,6 +1,6 @@
 import Logger from '../logger.js'
 import BaseApi from './BaseApi.js'
-import Utils from '../utils.js'
+import Utils from '../../discord/utils.js'
 import setCookie from 'set-cookie-parser'
 
 namespace apis {
@@ -200,7 +200,7 @@ namespace apis {
                         let endTime = endAt.split('T')[1].split('+')[0].replace(":00:00", ":00").replace(":30:00", ":30")
                         let playgroundName = booking["playgrounds"][0]["name"]
                         bookingsOk.push({
-                            title: startAt.split('T')[0] + " on " + playgroundName,
+                            title: playgroundName,
                             description: `From ${startTime} to ${endTime} (GMT ?)`,
                             date: startAt.split('T')[0],
                             time: startTime,
@@ -452,24 +452,37 @@ namespace apis {
         {
             await this.sleep(777);
             // Logger.debug("Calling", this.apiUrl+url, method, body, bearerToken);
-            let response = await fetch(this.apiUrl+url, {
-                "headers": {
-                    "accept": "*/*",
-                    "accept-language": "en-US,en;q=0.9",
-                    "content-type": "application/json; charset=UTF-8",
-                    "sec-ch-ua": "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\"",
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": "\"macOS\"",
-                    "sec-fetch-dest": "empty",
-                    "sec-fetch-mode": "cors",
-                    "sec-fetch-site": "same-origin",
-                    "x-requested-with": "XMLHttpRequest",
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
-                },
-                "body": body == null ? null : JSON.stringify(body),
-                "method": method
-            });
+            let response = null;
+            try {
+                response = await fetch(this.apiUrl+url, {
+                    "headers": {
+                        "accept": "*/*",
+                        "accept-language": "en-US,en;q=0.9",
+                        "content-type": "application/json; charset=UTF-8",
+                        "sec-ch-ua": "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\"",
+                        "sec-ch-ua-mobile": "?0",
+                        "sec-ch-ua-platform": "\"macOS\"",
+                        "sec-fetch-dest": "empty",
+                        "sec-fetch-mode": "cors",
+                        "sec-fetch-site": "same-origin",
+                        "x-requested-with": "XMLHttpRequest",
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
+                    },
+                    "body": body == null ? null : JSON.stringify(body),
+                    "method": method
+                });
+            }
+            catch (e)
+            {
+                Logger.error("Error while calling API", e);
+                this.addLog("error", "Error while calling API: "+e);
+                return {
+                    status: 500,
+                    error: e,
+                    isJson: false
+                }
+            }
             
 
             let rawData:any = await response.text();
