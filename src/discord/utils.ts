@@ -42,6 +42,13 @@ module Utils {
         }
         return result;
     }
+
+    export function getDayStringFromDate(d: Date) {
+        const kDaysList = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+        let day = d.getDay();
+        return kDaysList[day];
+
+    }
 }
 
 export default Utils

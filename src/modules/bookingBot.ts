@@ -161,13 +161,13 @@ namespace BookingBot {
                             let nextWeekDayStr = nextWeekDay.toISOString().split('.')[0].split('T')[0];
                             this.notifyWithFields("👟 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields, [
                                 {
-                                    label: `Re-book (on ${nextWeekDayStr})`,
+                                    label: `Re-book next week (${nextWeekDayStr} 18:30)`,
                                     emoji: "👟",
                                     options: {
                                         announcement: true
                                     },
                                     callback: () => {
-                                        this.createBookingTask(clubName, nextWeekDayStr, existingBooking.time);
+                                        this.createBookingTask(clubName, nextWeekDayStr, "18:30");
                                     }
                                 },
                                 {
@@ -540,7 +540,8 @@ namespace BookingBot {
                     name: booking.title,
                     value: booking.description
                 })
-                this.notifyWithFields(`Existing booking on ${booking.date}`, `At ${this.getClubFullName(clubName)}`, "#00fbff", fields, [
+                let weekDay = Utils.getDayStringFromDate(new Date(booking.date))
+                this.notifyWithFields(`Existing booking on ${weekDay} ${booking.date}`, `At ${this.getClubFullName(clubName)}`, "#00fbff", fields, [
                     {
                         label: "Add to Google Agenda",
                         emoji: "🗓️",

@@ -64,11 +64,23 @@ namespace ZtBot {
 		private getHelpButtons() {
 			return [
 				{
-					label: "Search on ZT",
-					emoji: "🍿",
+					label: "Latest Films",
+					emoji: "🎥",
+					options: {
+						
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						await this.handleMediaSearchRequest('', 5, 'films')
+					}
+				},
+				{
+					label: "Search Films",
+					emoji: "🔍",
 					options: {
 						inputs: [
-							{id: "type", label: "Type of search (films, series)", value: "films"},
+							// {id: "type", label: "Type of search (films, series)", value: "films"},
 							{id: "search", label: "Search", placeholder: "Search text"},
 							{id: "nb_result", label: "Amount of results", value: "2"},
 						],
@@ -76,7 +88,23 @@ namespace ZtBot {
 						executeOnlyOnce: false
 					},
 					callback: async (inputs) => {
-						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], inputs['type'])
+						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'films')
+					}
+				},
+				{
+					label: "Search Series",
+					emoji: "🔍",
+					options: {
+						inputs: [
+							// {id: "type", label: "Type of search (films, series)", value: "films"},
+							{id: "search", label: "Search", placeholder: "Search text"},
+							{id: "nb_result", label: "Amount of results", value: "2"},
+						],
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
 					}
 				},
 				{
@@ -132,7 +160,7 @@ namespace ZtBot {
 			});
 			if (reply.status != 200 || reply?.isJson == false)
 			{
-				this.discordBot.sendMessage(`ZT API failed (status: ${reply?.status})`, {
+				this.discordBot.sendMessage(`ZT API failed (status: ${reply?.status}, message: ${reply?.error})`, {
 					color: "#FF0000"
 				})
 			}
@@ -408,6 +436,7 @@ namespace ZtBot {
 
 		private dedupResults(results)
 		{
+			Logger.debug("ZtBot", "dedupResults", results)
 			// if title is same, choose one with highest quality
 			let dedupedResults = []
 			let titles = {}
@@ -528,6 +557,11 @@ namespace ZtBot {
             catch (e) {
                 // Not json
             }
+			if (isJson && rawData.status == 400)
+			{
+				rawData.error = rawData.message
+			}
+
 			if (isJson && rawData.error)
 			{
 				if (rawData.stack)
