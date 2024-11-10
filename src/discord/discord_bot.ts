@@ -81,23 +81,29 @@ module DiscordBot {
                 }
                 this.handleReactionAddition(event, user)
             });
-            this.client.on(Discord.Events.InteractionCreate, interaction => {
-                if (interaction.isButton())
-                {
-                    let buttonInteraction:Discord.ButtonInteraction = interaction
-                    if (this.channelIDsToNotify.indexOf(buttonInteraction.message.channelId) == -1) {
-                        return
+            this.client.on(Discord.Events.InteractionCreate, async (interaction) => {
+                try {
+                    if (interaction.isButton())
+                    {
+                        let buttonInteraction:Discord.ButtonInteraction = interaction
+                        if (this.channelIDsToNotify.indexOf(buttonInteraction.message.channelId) == -1) {
+                            return
+                        }
+                        await this.handleButtonInteraction(buttonInteraction)
                     }
-                    this.handleButtonInteraction(buttonInteraction)
-                }
 
-                if (interaction.isModalSubmit())
-                {
-                    let modalInteraction:Discord.ModalSubmitInteraction = interaction
-                    if (this.channelIDsToNotify.indexOf(modalInteraction.message.channelId) == -1) {
-                        return
+                    if (interaction.isModalSubmit())
+                    {
+                        let modalInteraction:Discord.ModalSubmitInteraction = interaction
+                        if (this.channelIDsToNotify.indexOf(modalInteraction.message.channelId) == -1) {
+                            return
+                        }
+                        await this.handleModalSubmit(modalInteraction)
                     }
-                    this.handleModalSubmit(modalInteraction)
+                }
+                catch (error) {
+                    Logger.error(this.prefix(), "Error handling interaction", error)
+                    this.sendMessage(`Error handling interaction:\n${error}`, {color: '#911515'})
                 }
             });
         }
@@ -176,17 +182,22 @@ module DiscordBot {
                 this.sendMessage(`Action **${postAction.description}** requested by ${interaction.user.displayName}`, {color: '#0099ff'})
             }
 
-            await interaction.deferReply({
-                ephemeral: postAction.isEphemeralReply()
-            })
-            let cb_reply = await postAction.run()
-            if (cb_reply)
-            {
-                await interaction.editReply(cb_reply)
-            }
-            else
-            {
-                await interaction.deleteReply()
+            try {
+                await interaction.deferReply({
+                    ephemeral: postAction.isEphemeralReply()
+                })
+                let cb_reply = await postAction.run()
+                if (cb_reply)
+                {
+                    await interaction.editReply(cb_reply)
+                }
+                else
+                {
+                    await interaction.deleteReply()
+                }
+            } catch (error) {
+                Logger.error(this.prefix(), "Error running post action", error)
+                this.sendMessage(`Error running action **${postAction.description}**:\n${error}`, {color: '#911515'})
             }
         }
         
