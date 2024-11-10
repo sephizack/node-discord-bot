@@ -59,30 +59,82 @@ namespace ZtBot {
 				fields: [],
 				buttons: this.getHelpButtons()
 			})
+
+			this.startNewItemNotifierDeamon('films')
+			this.startNewItemNotifierDeamon('series')
         }
+
+		private async startNewItemNotifierDeamon(category: string) {
+			let _alreadyNotified_ids = {}
+			try {
+				let results = await this.getSearchResults('_4k_', 15, category, false)
+				let skipFirst = true
+				for (let searchData of results)
+				{
+					if (skipFirst)
+					{
+						skipFirst = false
+						continue
+					}
+					_alreadyNotified_ids[searchData.id] = true
+				}
+				// Every 1h check for new items
+				let job = new CronJob('0 0 */1 * * *', async () => {
+					let results = await this.getSearchResults('_4k_', 15, category, false)
+					for (let searchData of results)
+					{
+						if (_alreadyNotified_ids[searchData.id] == null)
+						{
+							_alreadyNotified_ids[searchData.id] = true
+							let prefix = '';
+							if (category == 'films') {
+								prefix = '**@here Nouveau film 4K publié !**\n'
+							}
+							else if (category == 'series') {
+								prefix = '**@here Nouvelle série 4K publié !**\n'
+							}
+							this.displayResultCard(await this.getMediaDetails(searchData),prefix)
+						}
+					}
+				}, null, true, 'Europe/Paris');
+			}
+			catch (e) {
+				Logger.error("ZtBot", "startNewItemNotifierDeamon", e)
+			}
+		}
 
 		private getHelpButtons() {
 			return [
 				{
-					label: "Latest Films",
+					label: "Sorties Films 4K",
 					emoji: "🎥",
 					options: {
-						
 						announcement:false,
 						executeOnlyOnce: false
 					},
 					callback: async (inputs) => {
-						await this.handleMediaSearchRequest('', 5, 'films')
+						await this.handleMediaSearchRequest('_4k_', 7, 'films')
 					}
 				},
 				{
-					label: "Search Films",
+					label: "Films Populaires",
+					emoji: "🍿",
+					options: {
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						await this.handleMediaSearchRequest('_exclus_', 10, 'films')
+					}
+				},
+				{
+					label: "Chercher Films",
 					emoji: "🔍",
 					options: {
 						inputs: [
 							// {id: "type", label: "Type of search (films, series)", value: "films"},
 							{id: "search", label: "Search", placeholder: "Search text"},
-							{id: "nb_result", label: "Amount of results", value: "2"},
+							{id: "nb_result", label: "Amount of results", value: "6"},
 						],
 						announcement:false,
 						executeOnlyOnce: false
@@ -92,7 +144,19 @@ namespace ZtBot {
 					}
 				},
 				{
-					label: "Search Series",
+					label: "Sorties Series 4K",
+					emoji: "🎬",
+					options: {
+						
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						await this.handleMediaSearchRequest('_4k_', 5, 'series')
+					}
+				},
+				{
+					label: "Chercher Series",
 					emoji: "🔍",
 					options: {
 						inputs: [
@@ -107,21 +171,19 @@ namespace ZtBot {
 						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
 					}
 				},
-				{
-					label: "Help",
-					emoji: "❔",
-					options: {
-						announcement:false,
-						executeOnlyOnce: false
-					},
-					callback: () => {
-						this.displayHelp()
-					}
-				}
+				// {
+				// 	label: "Help",
+				// 	emoji: "❔",
+				// 	options: {
+				// 		announcement:false,
+				// 		executeOnlyOnce: false
+				// 	},
+				// 	callback: () => {
+				// 		this.displayHelp()
+				// 	}
+				// }
 			]
 		}
-
-
 
 		public async handleAction(type:string, data: any) {
 			Logger.debug("ZtBot", "handleAction", type, data)
@@ -152,38 +214,49 @@ namespace ZtBot {
 			}
 		}
 		
-		private async handleMediaSearchRequest(searchFreetext: string, nb_results_max: number, category: string) {
-			
+		private async getSearchResults(searchFreetext: string, nb_results_max: number, category: string, notifyProgress: boolean = true) {
 			let reply = await this.callZtApi('/api/search', {
 				category: category,
 				query: searchFreetext
 			});
 			if (reply.status != 200 || reply?.isJson == false)
 			{
-				this.discordBot.sendMessage(`ZT API failed (status: ${reply?.status}, message: ${reply?.error})`, {
-					color: "#FF0000"
-				})
+				if (notifyProgress)
+				{
+					this.discordBot.sendMessage(`ZT API failed (status: ${reply?.status}, message: ${reply?.error})`, {
+						color: "#FF0000"
+					})
+				}
+				return []
 			}
 			else if (reply.data.length == 0)
 			{
-				this.discordBot.sendMessage(`Aucun résultat trouvé pour ${searchFreetext}`, {
-					// color: "#0000"
-				})
+				if (notifyProgress)
+				{
+					this.discordBot.sendMessage(`Aucun résultat trouvé pour ${searchFreetext}`, {
+						// color: "#0000"
+					})
+				}
+				return []
 			}
 			else
 			{
 				let results = this.dedupResults(reply.data)
 				if (results.length > nb_results_max)
 				{
-					let truncTxt = nb_results_max > 1 ? `(seulement les ${nb_results_max} premiers seront affiché)` : "(selement le premier sera affiché)"
-					this.discordBot.sendMessage(`${results.length} resultats ${truncTxt}`, {
-						color: "#00ff00"
-					})
+					if (notifyProgress)
+					{
+						let truncTxt = nb_results_max > 1 ? `(seulement les ${nb_results_max} premiers seront affiché)` : "(selement le premier sera affiché)"
+						this.discordBot.sendMessage(`${results.length} resultats ${truncTxt}`, {
+							color: "#00ff00"
+						})
+					}
 					results = results.slice(0, nb_results_max)
 				}
+
+				let aSearchResults : MediaSearchResult[] = []
 				for (let aSearchResult of results)
 				{
-					// Retrieve full detials
 					let searchData : MediaSearchResult = {
 						id: aSearchResult.id,
 						title: aSearchResult.title,
@@ -192,22 +265,41 @@ namespace ZtBot {
 						quality: aSearchResult.quality,
 						language: aSearchResult.language
 					}
-					let resultDetails : MediaDetails = await this.retrieveDetailsForSearch(searchData)
-					if (!resultDetails)
-					{
-						continue;
-					}
-					let betterVersion : MediaSearchResult = this.findBetterVersionId(resultDetails)
-					if (betterVersion && betterVersion.id != aSearchResult.id)
-					{
-
-						resultDetails = await this.retrieveDetailsForSearch(betterVersion)
-					}
-
-					this.displayResultCard(resultDetails)
+					aSearchResults.push(searchData)
 				}
+				return aSearchResults
 			}
+		}
 
+		private async getMediaDetails(searchData: MediaSearchResult)
+		{
+			let resultDetails : MediaDetails = await this.retrieveDetailsForSearch(searchData)
+			if (!resultDetails)
+			{
+				return null;
+			}
+			let betterVersion : MediaSearchResult = this.findBetterVersionId(resultDetails)
+			if (betterVersion && betterVersion.id != searchData.id)
+			{
+				resultDetails = await this.retrieveDetailsForSearch(betterVersion)
+			}
+			return resultDetails
+		}
+
+		private async handleMediaSearchRequest(searchFreetext: string, nb_results_max: number, category: string, titleOnly: boolean = false) {
+			let results = await this.getSearchResults(searchFreetext, nb_results_max, category)
+			for (let searchData of results)
+			{
+				// Retrieve full detials & display
+				this.displayResultCard(await this.getMediaDetails(searchData))
+			}
+			await this.sleep(1000)
+			this.discordBot.sendMessage("Use buttons to interact", {
+				title: "Pour d'autres recherches utilisez les boutons ci-dessous",
+				color: "#800080",
+				fields: [],
+				buttons: this.getHelpButtons()
+			})
 		}
 
 		private displayHelp() {
@@ -259,7 +351,7 @@ namespace ZtBot {
 			})
 		}
 
-		private displayResultCard(media: MediaDetails) {
+		private displayResultCard(media: MediaDetails, descriptionPrefix: string = "") {
 			let resultsFields = [
 				{
 					name: `Genres`,
@@ -322,7 +414,7 @@ namespace ZtBot {
 					reviewStars += "☆"
 				}
 			}
-			this.discordBot.sendMessage(media.synopsis, {
+			this.discordBot.sendMessage(descriptionPrefix + media.synopsis, {
 				title: `${reviewStars} [${media.productionYear}] ${media.name}`,
 				fields: resultsFields,
 				color: "#00FF00",
@@ -343,10 +435,10 @@ namespace ZtBot {
 			} 
 			for (let aVersion of resultDetails.otherVersions)
 			{
-				console.log("Checking quality. Current:", bestVersion.quality, "New:", aVersion.quality)
+				// console.log("Checking quality. Current:", bestVersion.quality, "New:", aVersion.quality)
 				if (this.isNewQualityBetter(bestVersion.quality, aVersion.quality))
 				{
-					console.log("Found better version", aVersion.quality)
+					// console.log("Found better version", aVersion.quality)
 					bestVersion = aVersion
 					foundBetterVersion = true
 				}
@@ -381,7 +473,7 @@ namespace ZtBot {
 			}
 			let apiDetails = apiData.data.movieInfos;
             let otherVersions = apiData.data.otherVersions;
-            console.log("API Details", apiDetails);
+            // console.log("API Details", apiDetails);
             if (!apiDetails) {
                 console.error("No details found for ID", search.id, apiData);
                 this.displayResultCardWithSearchData(search);
@@ -436,7 +528,7 @@ namespace ZtBot {
 
 		private dedupResults(results)
 		{
-			Logger.debug("ZtBot", "dedupResults", results)
+			// Logger.debug("ZtBot", "dedupResults", results)
 			// if title is same, choose one with highest quality
 			let dedupedResults = []
 			let titles = {}
