@@ -52,6 +52,7 @@ namespace ZtBot {
         public constructor(discordBot: any, configData:any) {
             this.discordBot = discordBot
 			this.ztApiUrl = configData.ztApiUrl
+			this.filmsUrl = configData.filmsUrl
 
             this.discordBot.sendMessage("Use buttons to interact", {
 				title: "ZT Bot started",
@@ -71,11 +72,6 @@ namespace ZtBot {
 				let skipFirst = true
 				for (let searchData of results)
 				{
-					if (skipFirst)
-					{
-						skipFirst = false
-						continue
-					}
 					_alreadyNotified_ids[searchData.id] = true
 				}
 				// Every 1h check for new items
@@ -171,6 +167,11 @@ namespace ZtBot {
 						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
 					}
 				},
+				{
+					label: "Films disponibles",
+					emoji: "📂",
+					url: this.filmsUrl ? this.filmsUrl : ""
+				}
 				// {
 				// 	label: "Help",
 				// 	emoji: "❔",
@@ -355,7 +356,7 @@ namespace ZtBot {
 			let resultsFields = [
 				{
 					name: `Genres`,
-					value: `${media.genres.join(" | ")}`
+					value: `${media.genres ? media.genres.join(" | ") : "N/A"}`
 				},
 				{
 					name: `Directeur`,
@@ -363,7 +364,7 @@ namespace ZtBot {
 				},
 				{
 					name: `Acteurs`,
-					value: `${media.actors.join(" | ")}`
+					value: `${media.actors ? media.actors.join(" | ") : "Unknown"}`
 				},
 				{
 					name: `Details`,
@@ -383,6 +384,13 @@ namespace ZtBot {
                     url: media.url
                 })
             }
+
+			buttons.push({
+				label: "Trailer Youtube",
+				emoji: "▶️",
+				url: `https://www.youtube.com/results?search_query=bande+annonce+fr+${encodeURIComponent(media.name)}`
+			})
+
             if (media.trailerUrl) {
                 buttons.push({
                     label: "Trailer",
@@ -390,6 +398,7 @@ namespace ZtBot {
                     url: media.trailerUrl
                 })
             }
+
             for (let aLink of media.downloadLinks) {
                 if (!aLink.url) {
                     continue;
@@ -686,6 +695,7 @@ namespace ZtBot {
         
         discordBot:any;
         ztApiUrl:string;
+        filmsUrl:string;
     }
 }
 
