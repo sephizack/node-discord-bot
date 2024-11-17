@@ -52,6 +52,8 @@ namespace ZtBot {
         public constructor(discordBot: any, configData:any) {
             this.discordBot = discordBot
 			this.ztApiUrl = configData.ztApiUrl
+			this.alldebridApiUrl = configData.alldebridApiUrl
+			this.alldebridApiKey = configData.alldebridApiKey
 			this.filmsUrl = configData.filmsUrl
 
             this.discordBot.sendMessage("Use buttons to interact", {
@@ -82,14 +84,21 @@ namespace ZtBot {
 						if (_alreadyNotified_ids[searchData.id] == null)
 						{
 							_alreadyNotified_ids[searchData.id] = true
+							let mediaDetails = await this.getMediaDetails(searchData)
+							let curYear = new Date().getFullYear()
+							if (mediaDetails.productionYear && parseInt(mediaDetails.productionYear) < curYear - 1)
+							{
+								Logger.debug("ZtBot", "startNewItemNotifierDeamon", "Skipping item as productionYear is too old", mediaDetails.productionYear)
+								continue;
+							}
 							let prefix = '';
 							if (category == 'films') {
-								prefix = '**@here Nouveau film 4K publié !**\n'
+								prefix = '**@here Nouveau film en 4K disponible !**\n'
 							}
 							else if (category == 'series') {
-								prefix = '**@here Nouvelle série 4K publié !**\n'
+								prefix = '**@here Nouvelle publication 4K de plateformes de streaming !**\n'
 							}
-							this.displayResultCard(await this.getMediaDetails(searchData),prefix)
+							this.displayResultCard(mediaDetails ,prefix)
 						}
 					}
 				}, null, true, 'Europe/Paris');
@@ -171,7 +180,22 @@ namespace ZtBot {
 					label: "Films disponibles",
 					emoji: "📂",
 					url: this.filmsUrl ? this.filmsUrl : ""
-				}
+				},
+				{
+					label: "Debrider lien",
+					emoji: "🔓",
+					options: {
+						inputs: [
+							
+							{id: "link", label: "Link to debrid", placeholder: "(1fichier, uptobox, dl-protect, ...)"},
+						],
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						return await this.handleDebridLink(inputs['link'])
+					}
+				},
 				// {
 				// 	label: "Help",
 				// 	emoji: "❔",
@@ -184,6 +208,66 @@ namespace ZtBot {
 				// 	}
 				// }
 			]
+		}
+		
+		private async handleDebridLink(link: string) {
+			if (link.includes("dl-protect.link"))
+			{
+				let reply = await this.callAllDebrid(`/link/redirector`, {
+					link: link
+				});
+				if (reply.status != 200 || reply?.isJson == false)
+				{
+					this.discordBot.sendMessage(`AllDebrid API failed (status: ${reply?.status}, message: ${reply?.error})`, {
+						color: "#FF0000"
+					})
+					return
+				}
+				if (reply.data.status == "success" && reply.data.data.links && reply.data.data.links.length > 0)
+				{
+					link = reply.data.data.links[0]
+					Logger.info("ZtBot", "handleDebridLink", "DL Protect debrided", link)
+				}
+				else
+				{
+					this.discordBot.sendMessage(`AllDebrid API failed (status: ${reply?.status}, message: ${reply.data})`, {
+						color: "#FF0000"
+					})
+					return
+				}
+			}
+			let reply = await this.callAllDebrid(`/link/unlock`, {
+				link: link
+			});
+			if (reply.status != 200 || reply?.isJson == false)
+			{
+				this.discordBot.sendMessage(`AllDebrid API failed (status: ${reply?.status}, message: ${reply?.error})`, {
+					color: "#FF0000"
+				})
+				return
+			}
+			Logger.info("ZtBot", "handleDebridLink", "Debrided", reply.data.data)
+			this.discordBot.sendMessage(`Here is your debrided link 🍿`, {
+				color: "#00FF00",
+				fields: [
+					{
+						name: "Debrided Link",
+						value: reply.data.data.link
+					},
+					{
+						name: "Host",
+						value: reply.data.data.host
+					},
+					{
+						name: "Filename",
+						value: reply.data.data.filename
+					},
+					{
+						name: "Size",
+						value: Math.floor((reply.data.data.filesize / 1024 / 1024 /1024)*100)/100 + " Go"
+					}
+				]
+			})
 		}
 
 		public async handleAction(type:string, data: any) {
@@ -606,6 +690,19 @@ namespace ZtBot {
 			return this.callApi(this.ztApiUrl+url, null, "GET", "");
 		}
 
+		private async callAllDebrid(url = '', params = {})
+		{
+			url += "?";
+			params['agent'] = 'synology'
+			params['version'] = '4.1'
+			params['apikey'] = this.alldebridApiKey
+			for (let key in params)
+			{
+				url += key + "=" + encodeURIComponent(params[key]) + "&";
+			}
+			return this.callApi(this.alldebridApiUrl+url, null, "GET", "");
+		}
+
         private async callApi(url = '', body = {}, method = 'POST', bearerToken = "") 
         {
             await this.sleep(277);
@@ -695,6 +792,8 @@ namespace ZtBot {
         
         discordBot:any;
         ztApiUrl:string;
+        alldebridApiUrl:string;
+        alldebridApiKey:string;
         filmsUrl:string;
     }
 }

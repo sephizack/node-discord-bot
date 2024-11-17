@@ -60,6 +60,22 @@ namespace BookingBot {
         private getHelpButtons() {
             return [
                 {
+                    label: "Request new booking",
+                    emoji: "📚",
+                    options: {
+                        announcement:false,
+                        executeOnlyOnce: false,
+                        inputs: [
+							// {id: "type", label: "Type of search (films, series)", value: "films"},
+							{id: "club_name", label: "Club", placeholder: "allin | ballejaune", value: "allin"},
+							{id: "date", label: "Date", placeholder: "eg. 25MAR or 12JAN2025"},
+                            {id: "time", label: "Time", placeholder: "eg. 18:30", value: "18:30"},
+						],
+                    },
+                    callback: async (inputs) => {
+                        this.createBookingTask(inputs['club_name'], this.getCleanedDate(inputs['date']), this.getCleanedTime(inputs['time']));
+                    }
+                },{
                     label: "List Bookings",
                     emoji: "🗓️",
                     options: {
@@ -110,6 +126,73 @@ namespace BookingBot {
                     }
                 },
             ]
+        }
+
+        private startNextWeekPoll() {
+            let afterNextMondayDaysShift = Math.abs((new Date().getDay()-1-7) % 7) + 7
+            let afterNextMonday = new Date(Date.now() + afterNextMondayDaysShift * 24 * 60 * 60 * 1000)
+            let pollChoices = []
+            for (let i = 0; i < 5; i++)
+            {
+                let day = new Date(afterNextMonday)
+                day.setDate(day.getDate() + i)
+                let dayStr = day.toISOString().split('T')[0]
+                pollChoices.push({
+                    text: Utils.getDayStringFromDate(day) + " " + day.getDate(),
+                    id: dayStr,
+                    cb_data: {date: dayStr}
+                })
+            }
+            
+            let daysBooked = []
+            this.discordBot.sendPoll("Salut les gars !\nVoici un poll pour pre-book pour la semaine pro 🍺", pollChoices, {
+                durationHours: 26,
+                remindAfterHours: 20,
+                reminderNbUniqueUsersExpected: 4,
+                allowMultiselect: true,
+                callback: (event_type, message, answers) => {
+                    if (event_type == "reminder") {
+                        let dayAlmostOk = null
+                        answers.forEach((answer) => {
+                            if (answer.voteCount == 3)
+                            {
+                                dayAlmostOk = answer.text
+                            }
+                        });
+                        if (dayAlmostOk)
+                        {
+                            message.reply(`@everyone Plus qu'un vote pour ${dayAlmostOk} !`, {color: '#0099ff'})
+                        }
+                        else
+                        {
+                            message.reply("@everyone Le poll va bientôt se terminer, n'oubliez pas de voter", {color: '#d87919'})
+                        }
+                    } else if (event_type == "update") {
+                        // if one answer has 4 votes we book
+                        let daysOk = []
+                        answers.forEach((answer) => {
+                            Logger.info(`Answer ${answer.text} has ${answer.voteCount} votes`)
+                            if (answer.voteCount == 4)
+                            {
+                                if (!daysBooked.includes(answer.text))
+                                {
+                                    daysOk.push(answer.text)
+                                }
+                            }
+                        });
+                        if (daysBooked.length >= 2 && daysOk.length > 0)
+                        {
+                            message.reply("Not booking additional days as already 2 have been selected", {color: '#0008ff'})
+                            return
+                        }
+                        for (let day of daysOk)
+                        {
+                            daysBooked.push(day)
+                            this.createBookingTask("allin", day, "18:30")
+                        }
+                    }
+                }
+            })
         }
         
         private autoMonitor(clubName: string, autoMonitor: any) {
@@ -278,6 +361,12 @@ namespace BookingBot {
                         }
                     }
                 ]);
+            }
+            // On Saturday propose poll
+            let today = new Date()
+            if (today.getDay() == 6)
+            {
+                this.startNextWeekPoll()
             }
         }
 
@@ -505,6 +594,13 @@ namespace BookingBot {
         }
 
         private createBookingTask(clubName: string, date: string, time: string) {
+            //check input
+            if (!this.clubs[clubName])
+            {
+                this.discordBot.sendMessage(`Unknown club ${clubName}`, {color:"#ff0000"})
+                return
+            }
+
             this.tasks.push(
                 {
                     type: "book",

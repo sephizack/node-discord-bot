@@ -7,8 +7,29 @@ import https from 'https'
 
 module DiscordBot {
 
+    type CustomPollOptions = {
+        durationHours?: number,
+        remindAfterHours?: number,
+        reminderNbUniqueUsersExpected?: number,
+        allowMultiselect?: boolean,
+        callback?: any,
+	}
+
+    type CustomPollOptionsPrivate = {
+        durationHours?: number,
+        remindAfterHours?: number,
+        reminderNbUniqueUsersExpected?: number,
+        allowMultiselect?: boolean,
+        callback?: any,
+        _reminderDone?: boolean,
+        _answersAdditionalData?: any,
+        _createdTimestamp?: number,
+        _lastNbVotes?: any
+    }
 
     export class BaseDiscordBot {
+
+
         public constructor(token: string, notifyConfig:any, userActionCallback:any) {
             this.client = new Discord.Client({
                 intents: [Discord.GatewayIntentBits.MessageContent
@@ -16,6 +37,7 @@ module DiscordBot {
                         ,Discord.GatewayIntentBits.GuildMessageReactions
                         ,Discord.GatewayIntentBits.DirectMessages
                         ,Discord.GatewayIntentBits.GuildIntegrations
+                        ,Discord.GatewayIntentBits.GuildMessagePolls
                         ,Discord.GatewayIntentBits.Guilds]
                 
             });
@@ -23,6 +45,8 @@ module DiscordBot {
             this.userActionCallback = userActionCallback
             this.botUsername = "(not logged)"
             this.channelIDsToNotify = []
+            this.pollsToMonitor = new Map()
+            this.pollsOptions = new Map()
             this.postActionMap = new Map()
             for (let aNotifyAction of notifyConfig) {
                 if (aNotifyAction['channel']) {
@@ -43,8 +67,98 @@ module DiscordBot {
             }
             discordLogin();
             setInterval(discordLogin, 2*60*1000);
+            setInterval(() => {
+                if (thisBot.isConnected) {
+                    this.monitorPolls()
+                }
+            }, 1000*7);
+        }
+        
+        private async monitorPolls() {
+            let pollsCompleted = []
+            // Logger.debug(this.prefix(), "Monitoring polls: ", this.pollsToMonitor.size)
+            for (let id of this.pollsToMonitor.keys()) {
+                // Logger.debug(this.prefix(), "id", id)
+
+                let m = this.pollsToMonitor.get(id)
+                let pollOptions = this.pollsOptions.get(id)
+                // Logger.debug(this.prefix(), "Monitoring poll message", m)
+                // Logger.debug(this.prefix(), "Monitoring pollOptions", pollOptions)
+                
+                let canBeRemoved = await this.monitorPoll(m, pollOptions);
+                if (canBeRemoved) {
+                    pollsCompleted.push(id)
+                }
+            }
+            pollsCompleted.forEach((pollid) => {
+                this.pollsToMonitor.delete(pollid);
+            })
         }
 
+        private async monitorPoll(m: Discord.Message, pollOptions: CustomPollOptionsPrivate) : Promise<boolean> {
+            try {
+                // Logger.debug(this.prefix(), "Monitoring poll", m.id)
+                if (m.poll.expiresTimestamp < Date.now()) {
+                    // Callback completed
+                    if (pollOptions.callback) {
+                        try {
+                            pollOptions.callback("complete", m, m.poll.answers)
+                        } catch (error) {
+                            Logger.error(this.prefix(), "Error calling poll complete callback", error)
+                        }
+                    }
+                    return true;
+                }
+                
+                if (!pollOptions._lastNbVotes) {
+                    pollOptions._lastNbVotes = {}
+                }
+                let uniqueVoters = {}
+                m.poll.answers.forEach(async (answer) => {
+                    if (pollOptions.reminderNbUniqueUsersExpected > 0) {
+                        let voters = await answer.fetchVoters();
+                        voters.forEach((voter) => {
+                            uniqueVoters[voter.id] = voter
+                        });
+                        if (Object.keys(uniqueVoters).length >= pollOptions.reminderNbUniqueUsersExpected) {
+                            pollOptions._reminderDone = true
+                            // Logger.debug(this.prefix(), `Poll reminder will be skiped as ${pollOptions.reminderNbUniqueUsersExpected} replies received`)
+                        }
+                    }
+                    if (!pollOptions._lastNbVotes[answer.id]) {
+                        pollOptions._lastNbVotes[answer.id] = 0
+                    }
+                    if (pollOptions._lastNbVotes[answer.id] != answer.voteCount) {
+                        // Callback vote update
+                        if (pollOptions.callback) {
+                            try {
+                                pollOptions.callback('update', m, m.poll.answers)
+                            } catch (error) {
+                                Logger.error(this.prefix(), "Error calling poll vote update callback", error)
+                            }
+                        }
+                    }
+                });
+
+                if (!pollOptions._reminderDone && pollOptions.callback && pollOptions.remindAfterHours && pollOptions.remindAfterHours > 0.0)
+                {
+                    let reminderTimestamp = pollOptions._createdTimestamp + Math.ceil(pollOptions.remindAfterHours*60*60*1000)
+                    // Logger.debug(this.prefix(), `Reminder in ${(reminderTimestamp - Date.now())/1000} seconds`)
+                    if (reminderTimestamp < Date.now())
+                    {
+                        pollOptions._reminderDone = true
+                        try {
+                            pollOptions.callback('reminder', m, m.poll.answers)
+                        } catch (error) {
+                            Logger.error(this.prefix(), "Error calling poll reminder callback", error)
+                        }
+                    }
+                }
+            } catch (error) {
+                Logger.error(this.prefix(), "Error monitoring poll", error)
+            }
+            return false
+        }
 
         private setupClient() {
             this.client.on('ready', async () => {
@@ -91,14 +205,17 @@ module DiscordBot {
                         }
                         await this.handleButtonInteraction(buttonInteraction)
                     }
-
-                    if (interaction.isModalSubmit())
+                    else if (interaction.isModalSubmit())
                     {
                         let modalInteraction:Discord.ModalSubmitInteraction = interaction
                         if (this.channelIDsToNotify.indexOf(modalInteraction.message.channelId) == -1) {
                             return
                         }
                         await this.handleModalSubmit(modalInteraction)
+                    }
+                    else
+                    {
+                        Logger.warning(this.prefix(), "Un-handled interaction type:", interaction.type)
                     }
                 }
                 catch (error) {
@@ -222,7 +339,7 @@ module DiscordBot {
             buttonInteraction.showModal(modal);
         }
         
-        public sendMessage(content:string, options:any = {}) {
+        public async sendMessage(content:string, options:any = {}) {
             let message = new Discord.EmbedBuilder();
             message.setDescription(content)
             if (options.color)
@@ -312,17 +429,67 @@ module DiscordBot {
             }
         }
 
-        private handleSpecialMessage(message)
+        public async sendPoll(question:string, answers:any, options:CustomPollOptions = {}) {
+            try {
+                let pollOptions : CustomPollOptionsPrivate = {
+                    remindAfterHours: options.remindAfterHours ? options.remindAfterHours : 0,
+                    reminderNbUniqueUsersExpected: options.reminderNbUniqueUsersExpected ? options.reminderNbUniqueUsersExpected : 0,
+                    callback: options.callback,
+                    _reminderDone: false,
+                    _answersAdditionalData: [],
+                    _createdTimestamp: Date.now(),
+                    _lastNbVotes: {}
+                }
+                for (let c of this.channelsToNotify) {
+                    let aChannel : Discord.TextChannel = c;
+
+                    let discordPollData = {
+                        question: { text: question} ,
+                        answers: [],
+                        allowMultiselect: options.allowMultiselect ? options.allowMultiselect : false,
+                        duration: options.durationHours ? options.durationHours : 1,
+                    }
+                    
+                    for (let aAnswer of answers) {
+                        pollOptions._answersAdditionalData.push({
+                            id: aAnswer.id ? aAnswer.id : pollOptions._answersAdditionalData.length,
+                            cb_data: aAnswer.cb_data ? aAnswer.cb_data : null,
+                        });
+                        discordPollData.answers.push({
+                            text: aAnswer.text,
+                            emoji: aAnswer.emoji ? aAnswer.emoji : null
+                        })
+                    }
+
+                    let m = await aChannel.send({
+                        poll: discordPollData
+                    });
+    
+                    this.pollsToMonitor.set(m.id, m);
+                    this.pollsOptions.set(m.id, pollOptions);
+                }
+            }
+            catch (error) {
+                Logger.error(this.prefix(), "Error sending poll", error)
+                this.sendMessage(`Error creating poll:\n${error}`, {color: '#911515'})
+            }
+        }
+
+        private handleSpecialMessage(message:Discord.Message)
         {
             if (message.author && message.author.discriminator == this.client.user.discriminator)
             {
                 return
             }
-            if (message.mentions.users.has(this.client.user.id)) {
+            
+            // Check mentions
+            const matches = message.mentions.members.filter(member => member.id === this.client.user.id);
+            if (matches.size > 0) {
+                Logger.debug(this.prefix(), "Mention for bot found in message", message.content)
                 message.content = message.content.replace(/<@.*>/, "").trim()
                 this.userActionCallback("mention", message.content)
             }
-            if (message.content.indexOf("!") == 0) {
+            else if (message.content.indexOf("!") == 0) {
                 this.userActionCallback("message", message.content)
             }
         }
@@ -380,6 +547,8 @@ module DiscordBot {
         userActionCallback:any;
         channelIDsToNotify:string[];
         postActionMap:Map<String, PostAction>;
+        pollsToMonitor:Map<String, Discord.Message>;
+        pollsOptions:Map<String, CustomPollOptionsPrivate>;
     }
 
 }
