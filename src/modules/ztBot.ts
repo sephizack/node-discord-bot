@@ -57,7 +57,7 @@ namespace ZtBot {
 			this.filmsUrl = configData.filmsUrl
 
             this.discordBot.sendMessage("Use buttons to interact", {
-				title: "ZT Bot started",
+				title: "ZT Bot re-started",
 				color: "#800080",
 				fields: [],
 				buttons: this.getHelpButtons()
@@ -182,7 +182,7 @@ namespace ZtBot {
 					url: this.filmsUrl ? this.filmsUrl : ""
 				},
 				{
-					label: "Debrider lien",
+					label: "Debrider un lien",
 					emoji: "🔓",
 					options: {
 						inputs: [
@@ -483,16 +483,36 @@ namespace ZtBot {
                 })
             }
 
+			let bestLink = null
             for (let aLink of media.downloadLinks) {
                 if (!aLink.url) {
                     continue;
                 }
+				if (bestLink == "" || aLink.service == "1fichier")
+				{
+					bestLink = aLink
+				}
                 buttons.push({
                     label: aLink.service,
                     emoji: "📂",
                     url: aLink.url
                 });
             }
+
+			if (bestLink != null)
+			{
+				buttons.push({
+					label: `Debrider ${bestLink.service}`,
+					emoji: "🔓",
+					options: {
+						announcement:false,
+						executeOnlyOnce: true
+					},
+					callback: async (inputs) => {
+						return await this.handleDebridLink(bestLink.url)
+					}
+				})
+			}
 
 			let reviewStars = ""
 			if (media.review) {
