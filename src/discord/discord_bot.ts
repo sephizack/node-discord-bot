@@ -371,6 +371,11 @@ module DiscordBot {
             {
                 for (let aButton of options.buttons) {
                     let button = new Discord.ButtonBuilder();
+                    if (!aButton || !aButton.label)
+                    {
+                        Logger.error(this.prefix(), "Button must have a label", aButton)
+                        continue
+                    }
                     button.setLabel(aButton.label)
                     button.setEmoji(aButton.emoji)
                     if (aButton.url)

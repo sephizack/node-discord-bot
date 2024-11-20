@@ -176,7 +176,6 @@ namespace ZtBot {
 						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
 					}
 				},
-				,
 				{
 					label: "Debrider un lien",
 					emoji: "🔓",
