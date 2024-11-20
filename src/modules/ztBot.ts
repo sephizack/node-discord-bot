@@ -71,13 +71,12 @@ namespace ZtBot {
 			let _alreadyNotified_ids = {}
 			try {
 				let results = await this.getSearchResults('_4k_', 15, category, false)
-				let skipFirst = true
 				for (let searchData of results)
 				{
 					_alreadyNotified_ids[searchData.id] = true
 				}
 				// Every 1h check for new items
-				let job = new CronJob('0 0 */1 * * *', async () => {
+				let job = new CronJob('15 */1 * * *', async () => {
 					let results = await this.getSearchResults('_4k_', 15, category, false)
 					for (let searchData of results)
 					{
@@ -98,6 +97,7 @@ namespace ZtBot {
 							else if (category == 'series') {
 								prefix = '**@here Nouvelle publication 4K de plateformes de streaming !**\n'
 							}
+							Logger.info(`Detected new item in ${category}`, mediaDetails.name)
 							this.displayResultCard(mediaDetails ,prefix)
 						}
 					}
@@ -176,11 +176,7 @@ namespace ZtBot {
 						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
 					}
 				},
-				{
-					label: "Films disponibles",
-					emoji: "📂",
-					url: this.filmsUrl ? this.filmsUrl : ""
-				},
+				,
 				{
 					label: "Debrider un lien",
 					emoji: "🔓",
@@ -196,6 +192,11 @@ namespace ZtBot {
 						return await this.handleDebridLink(inputs['link'])
 					}
 				},
+				{
+					label: "Films disponibles",
+					emoji: "📂",
+					url: this.filmsUrl ? this.filmsUrl : ""
+				}
 				// {
 				// 	label: "Help",
 				// 	emoji: "❔",

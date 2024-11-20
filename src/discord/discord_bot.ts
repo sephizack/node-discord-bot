@@ -389,7 +389,7 @@ module DiscordBot {
                         let postActionId = Utils.getNewTokenForMap(this.postActionMap, 26)
                         let postAction = new PostAction(actionDescription, '', 1, aButton.callback, aButton.options)
                         this.postActionMap.set(postActionId, postAction)
-                        Logger.debug(this.prefix(), "Post action created", postActionId)
+                        // Logger.debug(this.prefix(), "Post action created", postActionId)
                         button.setCustomId(postActionId)
                     }
                     else

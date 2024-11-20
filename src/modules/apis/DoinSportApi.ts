@@ -70,7 +70,7 @@ namespace apis {
                 {
                     if (slot["dayOfWeek"] == 6 || slot["dayOfWeek"] == 0)
                     {
-                        Logger.info("Skipping weekend slot", slot);
+                        // Logger.info("Skipping weekend slot", slot);
                         continue;
                     }
                     availableSlotsFileds.push({
@@ -423,7 +423,7 @@ namespace apis {
         {
             if (this.lastLoginDate && (Date.now() - this.lastLoginDate) < 1000*60*60){
                 this.addLog("notify", "Already logged in, re-use token");
-                Logger.info("Already logged in, re-use token");
+                // Logger.info("Already logged in, re-use token");
                 return this.lastToken;
             }
             let reply = await this.callApi('/client_login_check', {
