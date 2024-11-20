@@ -31,6 +31,7 @@ namespace ZtBot {
 		image?: string;
 		quality?: string;
 		language?: string;
+		isBackupFromSearchData?: boolean;
 
 		name?: string;
 		synopsis?: string;
@@ -336,10 +337,10 @@ namespace ZtBot {
 							color: "#00ff00"
 						})
 					}
-					results = results.slice(0, nb_results_max)
 				}
 
 				let aSearchResults : MediaSearchResult[] = []
+				let aSearchResultsNotInTitle : MediaSearchResult[] = []
 				for (let aSearchResult of results)
 				{
 					let searchData : MediaSearchResult = {
@@ -350,18 +351,63 @@ namespace ZtBot {
 						quality: aSearchResult.quality,
 						language: aSearchResult.language
 					}
-					aSearchResults.push(searchData)
+					if (this.filterResult(searchData, searchFreetext))
+					{
+						aSearchResults.push(searchData)
+					}
+					else
+					{
+						aSearchResultsNotInTitle.push(searchData)
+					}
 				}
-				return aSearchResults
+
+				if (aSearchResults.length < nb_results_max)
+				{
+					for (let aSearchResult of aSearchResultsNotInTitle)
+					{
+						aSearchResults.push(aSearchResult)
+						if (aSearchResults.length >= nb_results_max)
+						{
+							break;
+						}
+					}
+				}
+				return aSearchResults.slice(0, nb_results_max)
 			}
 		}
+		
+		private filterResult(result: MediaSearchResult, searchFreetext: string): boolean {
+			// check that each word in searchFreetext is in the title
+			let searchWords = searchFreetext.split(' ')
+			for (let aWord of searchWords)
+			{
+				if (result.title.toLowerCase().indexOf(aWord.toLowerCase()) == -1)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
 
-		private async getMediaDetails(searchData: MediaSearchResult)
+		private mediaSearchToDetails(searchData: MediaSearchResult) : MediaDetails
+		{
+			let mediaDetails : MediaDetails = {
+				id: searchData.id,
+				url: searchData.url,
+				image: searchData.image,
+				quality: searchData.quality,
+				name: `[Incomplete result] ${searchData.title}`,
+				isBackupFromSearchData: true
+			}
+			return mediaDetails;
+		}
+
+		private async getMediaDetails(searchData: MediaSearchResult) : Promise<MediaDetails>
 		{
 			let resultDetails : MediaDetails = await this.retrieveDetailsForSearch(searchData)
 			if (!resultDetails)
 			{
-				return null;
+				return this.mediaSearchToDetails(searchData);
 			}
 			let betterVersion : MediaSearchResult = this.findBetterVersionId(resultDetails)
 			if (betterVersion && betterVersion.id != searchData.id)
@@ -437,6 +483,16 @@ namespace ZtBot {
 		}
 
 		private displayResultCard(media: MediaDetails, descriptionPrefix: string = "") {
+			if (!media)
+			{
+				Logger.error("ZtBot", "displayResultCard", "Cannot display null media")
+				return
+			}
+			if (media.isBackupFromSearchData)
+			{
+				this.displayResultCardWithSearchData(media)
+				return
+			}
 			let resultsFields = [
 				{
 					name: `Genres`,
@@ -484,20 +540,22 @@ namespace ZtBot {
             }
 
 			let bestLink = null
-            for (let aLink of media.downloadLinks) {
-                if (!aLink.url) {
-                    continue;
-                }
-				if (bestLink == "" || aLink.service == "1fichier")
-				{
-					bestLink = aLink
+			if (media.downloadLinks) {
+				for (let aLink of media.downloadLinks) {
+					if (!aLink.url) {
+						continue;
+					}
+					if (bestLink == "" || aLink.service == "1fichier")
+					{
+						bestLink = aLink
+					}
+					buttons.push({
+						label: aLink.service,
+						emoji: "📂",
+						url: aLink.url
+					});
 				}
-                buttons.push({
-                    label: aLink.service,
-                    emoji: "📂",
-                    url: aLink.url
-                });
-            }
+			}
 
 			if (bestLink != null)
 			{
