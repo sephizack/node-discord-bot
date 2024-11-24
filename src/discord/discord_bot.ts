@@ -357,10 +357,16 @@ module DiscordBot {
             if (options.fields)
             {
                 for (let aField of options.fields) {
-                    message.addFields({
-                        name: aField.name,
-                        value: aField.value
-                    })
+                    if (aField.name && aField.value) {
+                        message.addFields({
+                            name: aField.name,
+                            value: aField.value
+                        })
+                    }
+                    else 
+                    {
+                        Logger.info(this.prefix(), "Field skiped, must have a name and a value", aField)
+                    }
                 }
             }
 

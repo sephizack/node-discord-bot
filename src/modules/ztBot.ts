@@ -7,14 +7,15 @@ namespace ZtBot {
 	const qualityOrder = ["DVDRIP", "HDRIP", "WEBRiP", "WEBRIP",
 		"WEB-DL 720p", "WEBRIP 720p", "HDLIGHT 720p", "BLU-RAY 720p",
 		"HDLIGHT 1080p", "WEB-DL 1080p", "BLU-RAY 1080p",
-		"BDRIP", "BLURAY REMUX 4K", "4K LIGHT"]
+		"BDRIP", "BLURAY REMUX 4K", "WEB-DL 4K", "4K LIGHT"]
 	const Q_720_DEFAULT = "WEB-DL 720p"
 	const Q_1080_DEFAULT = "WEB-DL 1080p"
 	const Q_4K_DEFAULT = "4K LIGHT"
 
 
 	type MediaSearchResult = {
-		id?: string;
+		id: string;
+		type: string;
 		title?: string;
 		url?: string;
 		image?: string;
@@ -26,7 +27,8 @@ namespace ZtBot {
 		url?: string;
 	}
 	type MediaDetails = {
-		id?: string;
+		id: string;
+		type: string
 		url?: string;
 		image?: string;
 		quality?: string;
@@ -38,7 +40,7 @@ namespace ZtBot {
 		fileName?: string;
 		origin?: string;
 		duration?: string;
-		director?: string;
+		directors?: string[];
 		productionYear?: string;
 		originalTitle?: string;
 		review?: string;
@@ -85,6 +87,11 @@ namespace ZtBot {
 						{
 							_alreadyNotified_ids[searchData.id] = true
 							let mediaDetails = await this.getMediaDetails(searchData)
+							if (!mediaDetails)
+							{
+								Logger.error("ZtBot", "startNewItemNotifierDeamon", "Cannot retrieve details for media", searchData.id)
+								continue;
+							}
 							let curYear = new Date().getFullYear()
 							if (mediaDetails.productionYear && parseInt(mediaDetails.productionYear) < curYear - 1)
 							{
@@ -110,6 +117,23 @@ namespace ZtBot {
 		}
 
 		private getHelpButtons() {
+			let buildSearchButton = (searchText: string, searchType:string) => {
+				return {
+					label: `Search ${searchText}`,
+					emoji: "🔍",
+					options: {
+						inputs: [
+							{id: "search", label: "Search", placeholder: "Search text"},
+							{id: "nb_result", label: "Amount of results", value: "6"},
+						],
+						announcement:false,
+						executeOnlyOnce: false
+					},
+					callback: async (inputs) => {
+						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], searchType)
+					}
+				}
+			}
 			return [
 				{
 					label: "Sorties Films 4K",
@@ -134,22 +158,6 @@ namespace ZtBot {
 					}
 				},
 				{
-					label: "Chercher Films",
-					emoji: "🔍",
-					options: {
-						inputs: [
-							// {id: "type", label: "Type of search (films, series)", value: "films"},
-							{id: "search", label: "Search", placeholder: "Search text"},
-							{id: "nb_result", label: "Amount of results", value: "6"},
-						],
-						announcement:false,
-						executeOnlyOnce: false
-					},
-					callback: async (inputs) => {
-						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'films')
-					}
-				},
-				{
 					label: "Sorties Series 4K",
 					emoji: "🎬",
 					options: {
@@ -161,22 +169,9 @@ namespace ZtBot {
 						await this.handleMediaSearchRequest('_4k_', 5, 'series')
 					}
 				},
-				{
-					label: "Chercher Series",
-					emoji: "🔍",
-					options: {
-						inputs: [
-							// {id: "type", label: "Type of search (films, series)", value: "films"},
-							{id: "search", label: "Search", placeholder: "Search text"},
-							{id: "nb_result", label: "Amount of results", value: "2"},
-						],
-						announcement:false,
-						executeOnlyOnce: false
-					},
-					callback: async (inputs) => {
-						await this.handleMediaSearchRequest(inputs['search'], inputs['nb_result'], 'series')
-					}
-				},
+				buildSearchButton('Films', 'films'),
+				buildSearchButton('Series', 'series'),
+				buildSearchButton('Mangas', 'mangas'),
 				{
 					label: "Debrider un lien",
 					emoji: "🔓",
@@ -300,7 +295,7 @@ namespace ZtBot {
 			}
 		}
 		
-		private async getSearchResults(searchFreetext: string, nb_results_max: number, category: string, notifyProgress: boolean = true) {
+		private async getSearchResults(searchFreetext: string, nb_results_max: number, category: string, notifyProgress: boolean = true) : Promise<MediaSearchResult[]> {
 			let reply = await this.callZtApi('/api/search', {
 				category: category,
 				query: searchFreetext
@@ -345,6 +340,7 @@ namespace ZtBot {
 				{
 					let searchData : MediaSearchResult = {
 						id: aSearchResult.id,
+						type: this.convertCategoryToType(category),
 						title: aSearchResult.title,
 						url: aSearchResult.url,
 						image: aSearchResult.image,
@@ -375,6 +371,11 @@ namespace ZtBot {
 				return aSearchResults.slice(0, nb_results_max)
 			}
 		}
+
+		private convertCategoryToType(category: string): string {
+			// remove last char if it's an 's'
+			return category.slice(-1) == 's' ? category.slice(0, -1) : category
+		}
 		
 		private filterResult(result: MediaSearchResult, searchFreetext: string): boolean {
 			// check that each word in searchFreetext is in the title
@@ -393,6 +394,7 @@ namespace ZtBot {
 		{
 			let mediaDetails : MediaDetails = {
 				id: searchData.id,
+				type: searchData.type,
 				url: searchData.url,
 				image: searchData.image,
 				quality: searchData.quality,
@@ -402,27 +404,42 @@ namespace ZtBot {
 			return mediaDetails;
 		}
 
-		private async getMediaDetails(searchData: MediaSearchResult) : Promise<MediaDetails>
+		private async getMediaDetails(searchData: MediaSearchResult) : Promise<MediaDetails | null>
 		{
-			let resultDetails : MediaDetails = await this.retrieveDetailsForSearch(searchData)
-			if (!resultDetails)
-			{
-				return this.mediaSearchToDetails(searchData);
+			try {
+				let resultDetails : MediaDetails = await this.retrieveDetailsForSearch(searchData)
+				if (!resultDetails)
+				{
+					return this.mediaSearchToDetails(searchData);
+				}
+				let betterVersion : MediaSearchResult = this.findBetterVersionId(resultDetails)
+				if (betterVersion && betterVersion.id != searchData.id)
+				{
+					resultDetails = await this.retrieveDetailsForSearch(betterVersion)
+				}
+				return resultDetails
 			}
-			let betterVersion : MediaSearchResult = this.findBetterVersionId(resultDetails)
-			if (betterVersion && betterVersion.id != searchData.id)
-			{
-				resultDetails = await this.retrieveDetailsForSearch(betterVersion)
+			catch (e) {
+				Logger.error("ZtBot", "getMediaDetails", e)
 			}
-			return resultDetails
+			return null
 		}
 
-		private async handleMediaSearchRequest(searchFreetext: string, nb_results_max: number, category: string, titleOnly: boolean = false) {
-			let results = await this.getSearchResults(searchFreetext, nb_results_max, category)
-			for (let searchData of results)
-			{
-				// Retrieve full detials & display
-				this.displayResultCard(await this.getMediaDetails(searchData))
+		private async handleMediaSearchRequest(searchFreetext: string, nb_results_max: number, category: string) {
+			try {
+				Logger.info("ZtBot", "handleMediaSearchRequest", searchFreetext, nb_results_max, category)
+				let results = await this.getSearchResults(searchFreetext, nb_results_max, category)
+				for (let searchData of results)
+				{
+					// Retrieve full detials & display
+					this.displayResultCard(await this.getMediaDetails(searchData))
+				}
+			}
+			catch (e) {
+				Logger.error("ZtBot", "handleMediaSearchRequest", e)
+				this.discordBot.sendMessage(`Error while searching for ${searchFreetext} in ${category}`, {
+					color: "#FF0000"
+				})
 			}
 			await this.sleep(1000)
 			this.discordBot.sendMessage("Use buttons to interact", {
@@ -482,7 +499,7 @@ namespace ZtBot {
 			})
 		}
 
-		private displayResultCard(media: MediaDetails, descriptionPrefix: string = "") {
+		private async displayResultCard(media: MediaDetails, descriptionPrefix: string = "") {
 			if (!media)
 			{
 				Logger.error("ZtBot", "displayResultCard", "Cannot display null media")
@@ -490,7 +507,15 @@ namespace ZtBot {
 			}
 			if (media.isBackupFromSearchData)
 			{
-				this.displayResultCardWithSearchData(media)
+				let mediaSearch : MediaSearchResult = {
+					id: media.id,
+					type: media.type,
+					title: media.name,
+					url: media.url,
+					image: media.image,
+					quality: media.quality,
+				}
+				this.displayResultCardWithSearchData(mediaSearch)
 				return
 			}
 			let resultsFields = [
@@ -499,8 +524,8 @@ namespace ZtBot {
 					value: `${media.genres ? media.genres.join(" | ") : "N/A"}`
 				},
 				{
-					name: `Directeur`,
-					value: `${media.director}`
+					name: `Réalisateurs`,
+					value: `${media.directors ? media.directors.join(" | ") : "Unknown"}`
 				},
 				{
 					name: `Acteurs`,
@@ -598,6 +623,7 @@ namespace ZtBot {
 			let foundBetterVersion = false
 			let bestVersion : MediaSearchResult = {
 				id: resultDetails.id,
+				type: resultDetails.type,
 				title: resultDetails.name,
 				url: resultDetails.url,
 				image: resultDetails.image,
@@ -625,6 +651,7 @@ namespace ZtBot {
 		private async retrieveDetailsForSearch(search: MediaSearchResult) : Promise<MediaDetails> {
 			let mediaDetails : MediaDetails = {
 				id: search.id,
+				type: search.type,
 				url: search.url,
 				image: search.image,
 				quality: search.quality,
@@ -632,7 +659,8 @@ namespace ZtBot {
 			}
 
 			let apiData = await this.callZtApi('/api/getMovieDetails', {
-				id: search.id
+				id: search.id,
+				type: search.type
 			});
 
 			if (apiData.status != 200 || apiData?.isJson == false)
@@ -656,25 +684,26 @@ namespace ZtBot {
 			mediaDetails.fileName = apiDetails.fileName
 			mediaDetails.origin = apiDetails.origin
 			mediaDetails.duration = apiDetails.duration
-			try {
-				mediaDetails.director = decodeURIComponent(apiDetails.director.split('search=')[1])
-			} catch (e) {
-				mediaDetails.director = ""
-			}
 			mediaDetails.productionYear = apiDetails.productionYear
 			mediaDetails.originalTitle = apiDetails.originalTitle
 			mediaDetails.review = apiDetails.review
 			mediaDetails.trailerUrl = apiDetails.trailer
+			mediaDetails.directors = []
+            if (apiDetails.director) {
+                for (let actor of apiDetails.director) {
+                    mediaDetails.directors.push(actor);
+                }
+            }
 			mediaDetails.actors = []
             if (apiDetails.actors) {
                 for (let actor of apiDetails.actors) {
-                    mediaDetails.actors.push(actor.name);
+                    mediaDetails.actors.push(actor);
                 }
             }
             mediaDetails.genres = []
             if (apiDetails.genres) {
                 for (let genre of apiDetails.genres) {
-                    mediaDetails.genres.push(genre.name);
+                    mediaDetails.genres.push(genre);
                 }
             }
 			mediaDetails.downloadLinks = apiDetails.downloadLinks
@@ -799,7 +828,7 @@ namespace ZtBot {
                         "sec-fetch-site": "same-origin",
                         "x-requested-with": "XMLHttpRequest",
                         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
+                        // "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
                     },
                     "body": body == null ? null : JSON.stringify(body),
                     "method": method
