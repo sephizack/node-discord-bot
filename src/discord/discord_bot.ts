@@ -373,46 +373,68 @@ module DiscordBot {
             let actionRows = []
             let actionRow = new Discord.ActionRowBuilder();
             let hasButtons = false
+            let isButtonsFull = false
             if (options.buttons)
             {
                 for (let aButton of options.buttons) {
-                    let button = new Discord.ButtonBuilder();
                     if (!aButton || !aButton.label)
                     {
                         Logger.error(this.prefix(), "Button must have a label", aButton)
                         continue
                     }
-                    button.setLabel(aButton.label)
-                    button.setEmoji(aButton.emoji)
-                    if (aButton.url)
+                    if (isButtonsFull)
                     {
-                        button.setStyle(Discord.ButtonStyle.Link)
-                        button.setURL(aButton.url)
-                    }
-                    else if (aButton.callback)
-                    {
-                        let actionDescription = aButton.actionDescription ? aButton.actionDescription : aButton.label
-                        button.setStyle(aButton.isSecondary ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Primary)
-                        if (aButton?.options?.needsConfirmation)
-                        {
-                            button.setStyle(Discord.ButtonStyle.Danger)
-                        }
-                        let postActionId = Utils.getNewTokenForMap(this.postActionMap, 26)
-                        let postAction = new PostAction(actionDescription, '', 1, aButton.callback, aButton.options)
-                        this.postActionMap.set(postActionId, postAction)
-                        // Logger.debug(this.prefix(), "Post action created", postActionId)
-                        button.setCustomId(postActionId)
+                        Logger.warning(this.prefix(), "Max number of buttons reached, best effort adding it as field")
+                        message.addFields({
+                            name: `[Button backup] ${aButton.emoji} ${aButton.label}`,
+                            value: `${aButton.url ? aButton.url : 
+                                `Action ${aButton.actionDescription ? aButton.actionDescription : aButton.label} (Cannot be excuted as max buttons reached)`}`
+                        })
+                        continue
                     }
                     else
                     {
-                        throw new Error("Button must have either a URL or a callback")
+                        let button = new Discord.ButtonBuilder();
+                        button.setLabel(aButton.label)
+                        button.setEmoji(aButton.emoji)
+                        if (aButton.url)
+                        {
+                            button.setStyle(Discord.ButtonStyle.Link)
+                            button.setURL(aButton.url)
+                        }
+                        else if (aButton.callback)
+                        {
+                            let actionDescription = aButton.actionDescription ? aButton.actionDescription : aButton.label
+                            button.setStyle(aButton.isSecondary ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Primary)
+                            if (aButton?.options?.needsConfirmation)
+                            {
+                                button.setStyle(Discord.ButtonStyle.Danger)
+                            }
+                            let postActionId = Utils.getNewTokenForMap(this.postActionMap, 26)
+                            let postAction = new PostAction(actionDescription, '', 1, aButton.callback, aButton.options)
+                            this.postActionMap.set(postActionId, postAction)
+                            // Logger.debug(this.prefix(), "Post action created", postActionId)
+                            button.setCustomId(postActionId)
+                        }
+                        else
+                        {
+                            throw new Error("Button must have either a URL or a callback")
+                        }
+                        actionRow.addComponents(button)
+                        hasButtons = true
                     }
-                    actionRow.addComponents(button)
-                    hasButtons = true
                     if (actionRow.components.length == 5)
                     {
                         actionRows.push(actionRow)
-                        actionRow = new Discord.ActionRowBuilder();
+                        if (actionRows.length == 5)
+                        {
+                            isButtonsFull = true
+                            actionRow = null
+                        }
+                        else
+                        {
+                            actionRow = new Discord.ActionRowBuilder();
+                        }
                     }
                 }
             }
@@ -422,7 +444,7 @@ module DiscordBot {
                 message.setImage(options.image)
             }
 
-            if (actionRow.components.length > 0)
+            if (actionRow && actionRow.components.length > 0)
             {
                 actionRows.push(actionRow)
             }

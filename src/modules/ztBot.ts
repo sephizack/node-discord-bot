@@ -23,7 +23,7 @@ namespace ZtBot {
 		language?: string;
 	}
 	type DownloadLink = {
-		service?: string;
+		dlname?: string;
 		url?: string;
 	}
 	type MediaDetails = {
@@ -37,7 +37,7 @@ namespace ZtBot {
 
 		name?: string;
 		synopsis?: string;
-		fileName?: string;
+		filesize?: string;
 		origin?: string;
 		duration?: string;
 		directors?: string[];
@@ -532,12 +532,12 @@ namespace ZtBot {
 					value: `${media.actors ? media.actors.join(" | ") : "Unknown"}`
 				},
 				{
-					name: `Details`,
-					value: `${media.duration} | ${media.quality} | ${media.language} | ${media.origin} | ${media.review}`
+					name: `Reviews`,
+					value: `Allocine: ${media.review} | [View on IMDb](https://www.imdb.com/find/?q=${encodeURIComponent(media.name)})`
 				},
 				{
-					name: `Fichier`,
-					value: `${media.fileName}`
+					name: `Details`,
+					value: `${media.duration} | ${media.quality} | ${media.language} | ${media.origin} | Size: ${media.filesize}`
 				}
 			]
 
@@ -570,13 +570,13 @@ namespace ZtBot {
 					if (!aLink.url) {
 						continue;
 					}
-					if (bestLink == "" || aLink.service == "1fichier")
+					if (bestLink == "" || aLink.dlname == "1fichier")
 					{
 						bestLink = aLink
 					}
 					buttons.push({
-						label: aLink.service,
-						emoji: "📂",
+						label: aLink.dlname,
+						emoji: "⬇️",
 						url: aLink.url
 					});
 				}
@@ -585,7 +585,7 @@ namespace ZtBot {
 			if (bestLink != null)
 			{
 				buttons.push({
-					label: `Debrider ${bestLink.service}`,
+					label: `Debrider ${bestLink.dlname}`,
 					emoji: "🔓",
 					options: {
 						announcement:false,
@@ -681,7 +681,7 @@ namespace ZtBot {
 
 			mediaDetails.name = apiDetails.name
 			mediaDetails.synopsis = apiDetails.synopsis
-			mediaDetails.fileName = apiDetails.fileName
+			mediaDetails.filesize = apiDetails.filesize
 			mediaDetails.origin = apiDetails.origin
 			mediaDetails.duration = apiDetails.duration
 			mediaDetails.productionYear = apiDetails.productionYear
@@ -871,17 +871,34 @@ namespace ZtBot {
 			{
 				if (rawData.stack)
 				{
-					Logger.error("Error while calling API "+url, rawData.error, rawData.stack);
-					this.discordBot.sendMessage(`${rawData.stack.join("\n\n")}`, {
-						color: "#FF0000",
-						title: "Error returned by ZT API proxy",
-						fields: [
-							{
-								name: "URL",
-								value: url
-							}
-						]
-					})
+					// Logger.error("Error while calling API "+url, rawData.error, rawData.stack);
+					if (rawData.stack.length > 0 && rawData.stack[0].includes('DNS might have changed recently'))
+					{
+						this.discordBot.sendMessage(`${rawData.stack[0]}`, {
+							color: "#00a2ff",
+							title: "ZT semble avoir déménagé 🛠️",
+							fields: [
+								{
+									name: "Called URL",
+									value: url
+								}
+							]
+						})
+					}
+					else 
+					{
+						Logger.error("Error while calling API "+url, rawData.error, rawData.stack);
+						this.discordBot.sendMessage(`${rawData.stack.join("\n\n")}`, {
+							color: "#FF0000",
+							title: "Error returned by ZT API proxy",
+							fields: [
+								{
+									name: "Called URL",
+									value: url
+								}
+							]
+						})
+					}
 				}
 				return {
 					status: 500,
