@@ -91,6 +91,7 @@ module DiscordBot {
                 }
             }
             pollsCompleted.forEach((pollid) => {
+                Logger.info(this.prefix(), `Poll ${pollid} completed, removing it`, pollid)
                 this.pollsToMonitor.delete(pollid);
             })
         }
@@ -113,8 +114,10 @@ module DiscordBot {
                 if (!pollOptions._lastNbVotes) {
                     pollOptions._lastNbVotes = {}
                 }
+
+                // Call update callback when votes are updated
                 let uniqueVoters = {}
-                m.poll.answers.forEach(async (answer) => {
+                m.poll.answers.forEach(async (answer : Discord.PollAnswer) => {
                     if (pollOptions.reminderNbUniqueUsersExpected > 0) {
                         let voters = await answer.fetchVoters();
                         voters.forEach((voter) => {
@@ -129,6 +132,7 @@ module DiscordBot {
                         pollOptions._lastNbVotes[answer.id] = 0
                     }
                     if (pollOptions._lastNbVotes[answer.id] != answer.voteCount) {
+                        pollOptions._lastNbVotes[answer.id] = answer.voteCount
                         // Callback vote update
                         if (pollOptions.callback) {
                             try {

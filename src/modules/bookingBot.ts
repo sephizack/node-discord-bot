@@ -167,22 +167,22 @@ namespace BookingBot {
                         {
                             message.reply("@everyone Le poll va bientôt se terminer, n'oubliez pas de voter", {color: '#d87919'})
                         }
-                    } else if (event_type == "update") {
+                    } else if (event_type == "update" || event_type == "complete" ) {
                         // if one answer has 4 votes we book
                         let daysOk = []
                         answers.forEach((answer) => {
-                            Logger.info(`Answer ${answer.text} has ${answer.voteCount} votes`)
+                            // Logger.info(`Answer ${answer.text} has ${answer.voteCount} votes`)
                             if (answer.voteCount == 4)
                             {
-                                if (!daysBooked.includes(answer.text))
+                                if (!daysBooked.includes(answer.id))
                                 {
-                                    daysOk.push(answer.text)
+                                    daysOk.push(answer.id)
                                 }
                             }
                         });
                         if (daysBooked.length >= 2 && daysOk.length > 0)
                         {
-                            message.reply("Not booking additional days as already 2 have been selected", {color: '#0008ff'})
+                            message.reply("Not booking additional days as already 2 have been selected already", {color: '#0008ff'})
                             return
                         }
                         for (let day of daysOk)
