@@ -44,7 +44,9 @@ namespace ZtBot {
 		productionYear?: string;
 		originalTitle?: string;
 		review?: string;
+		imdb_reviews?: string;
 		trailerUrl?: string;
+		imdbUrl?: string;
 		actors?: string[];
 		genres?: string[];
 		downloadLinks?: DownloadLink[];
@@ -57,6 +59,7 @@ namespace ZtBot {
 			this.ztApiUrl = configData.ztApiUrl
 			this.alldebridApiUrl = configData.alldebridApiUrl
 			this.alldebridApiKey = configData.alldebridApiKey
+			this.apikey_collectapi = configData.apikey_collectapi
 			this.filmsUrl = configData.filmsUrl
 
             this.discordBot.sendMessage("Use buttons to interact", {
@@ -116,6 +119,24 @@ namespace ZtBot {
 			}
 		}
 
+		private getDebrideurButton() {
+			return {
+				label: "Debrider un lien",
+				emoji: "🔓",
+				options: {
+					inputs: [
+						
+						{id: "link", label: "Link to debrid", placeholder: "(1fichier, uptobox, dl-protect, ...)"},
+					],
+					announcement:false,
+					executeOnlyOnce: false
+				},
+				callback: async (inputs) => {
+					return await this.handleDebridLink(inputs['link'])
+				}
+			}
+		}
+
 		private getHelpButtons() {
 			let buildSearchButton = (searchText: string, searchType:string) => {
 				return {
@@ -172,21 +193,7 @@ namespace ZtBot {
 				buildSearchButton('Films', 'films'),
 				buildSearchButton('Series', 'series'),
 				buildSearchButton('Mangas', 'mangas'),
-				{
-					label: "Debrider un lien",
-					emoji: "🔓",
-					options: {
-						inputs: [
-							
-							{id: "link", label: "Link to debrid", placeholder: "(1fichier, uptobox, dl-protect, ...)"},
-						],
-						announcement:false,
-						executeOnlyOnce: false
-					},
-					callback: async (inputs) => {
-						return await this.handleDebridLink(inputs['link'])
-					}
-				},
+				this.getDebrideurButton(),
 				{
 					label: "Films disponibles",
 					emoji: "📂",
@@ -505,6 +512,11 @@ namespace ZtBot {
 				Logger.error("ZtBot", "displayResultCard", "Cannot display null media")
 				return
 			}
+
+			media.imdb_reviews = `Allocine: ${media.review} | [View on IMDb](https://www.imdb.com/find/?q=${encodeURIComponent(media.name)})`
+
+			await this.retrieveAdvancedReviews(media)
+			
 			if (media.isBackupFromSearchData)
 			{
 				let mediaSearch : MediaSearchResult = {
@@ -518,7 +530,14 @@ namespace ZtBot {
 				this.displayResultCardWithSearchData(mediaSearch)
 				return
 			}
-			let resultsFields = [
+			let resultsFields = []
+			if (media.imdb_reviews) {
+				resultsFields.push({
+					name: `IMDb`,
+					value: `${media.imdb_reviews}\n[Open IMDb Page](${media.imdbUrl})`
+				});
+			}
+			resultsFields = resultsFields.concat([
 				{
 					name: `Genres`,
 					value: `${media.genres ? media.genres.join(" | ") : "N/A"}`
@@ -532,14 +551,10 @@ namespace ZtBot {
 					value: `${media.actors ? media.actors.join(" | ") : "Unknown"}`
 				},
 				{
-					name: `Reviews`,
-					value: `Allocine: ${media.review} | [View on IMDb](https://www.imdb.com/find/?q=${encodeURIComponent(media.name)})`
-				},
-				{
 					name: `Details`,
 					value: `${media.duration} | ${media.quality} | ${media.language} | ${media.origin} | Size: ${media.filesize}`
 				}
-			]
+			]);
 
 			let buttons = []
 			if (media.url) {
@@ -550,19 +565,21 @@ namespace ZtBot {
                 })
             }
 
+			if (media.imdbUrl) {
+				buttons.push({
+					label: "IMDb page",
+					emoji: "🎬",
+					url: media.imdbUrl
+				})
+			}
+
 			buttons.push({
 				label: "Trailer Youtube",
 				emoji: "▶️",
 				url: `https://www.youtube.com/results?search_query=bande+annonce+fr+${encodeURIComponent(media.name)}`
 			})
 
-            if (media.trailerUrl) {
-                buttons.push({
-                    label: "Trailer",
-                    emoji: "🎬",
-                    url: media.trailerUrl
-                })
-            }
+			buttons.push(this.getDebrideurButton());
 
 			let bestLink = null
 			if (media.downloadLinks) {
@@ -570,7 +587,7 @@ namespace ZtBot {
 					if (!aLink.url) {
 						continue;
 					}
-					if (bestLink == "" || aLink.dlname == "1fichier")
+					if (bestLink == null || aLink.dlname == "1fichier")
 					{
 						bestLink = aLink
 					}
@@ -582,6 +599,7 @@ namespace ZtBot {
 				}
 			}
 
+			
 			if (bestLink != null)
 			{
 				buttons.push({
@@ -599,7 +617,7 @@ namespace ZtBot {
 
 			let reviewStars = ""
 			if (media.review) {
-				let nb_stars = Math.ceil(parseFloat(media.review.split('/')[0]))
+				let nb_stars = Math.floor(parseFloat(media.review.split('/')[0]))
 				for (let i = 0; i < nb_stars; i++)
 				{
 					reviewStars += "★"
@@ -617,6 +635,50 @@ namespace ZtBot {
 				image: media.image,
 				buttons: buttons
 			})
+		}
+
+		private async retrieveAdvancedReviews(media: MediaDetails)
+		{
+			let api_auth = "apikey "+this.apikey_collectapi
+			if (!media.name)
+			{
+				return null
+			}
+			let reply = await this.callApi(`https://www.imdb.com/find/?q=${encodeURIComponent(media.name)}`, null, "GET", "");
+			if (reply.status != 200)
+			{
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find imdb id for "+media.name, reply)
+				return null
+			}
+			let links = reply.data.split('href="/title/')
+			if (links.length == 0)
+			{
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find imdb id for "+media.name)
+				return null
+			}
+
+			let bestImdbId = links[1].split('/')[0]
+			Logger.info("ZtBot", "retrieveAdvancedReviews", "Found imdbId for "+media.name, bestImdbId)
+
+			let reply_for_id = await this.callApi(`https://api.collectapi.com/imdb/imdbSearchById?movieId=${bestImdbId}`, null, "GET", api_auth);
+			if (reply_for_id.status != 200 || reply_for_id?.isJson == false || reply_for_id.data.success == false)
+			{
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot retrieve advanced reviews", media.name)
+				return null
+			}
+			let imdbDetails = reply_for_id.data.result;
+			if (!imdbDetails)
+			{
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find details for imdbId", bestImdbId)
+				return null
+			}
+			
+			media.name = imdbDetails.Title
+			media.review = ""+(parseFloat(imdbDetails.imdbRating)/2)
+			media.imdb_reviews = `**${imdbDetails.imdbRating}/10** (${imdbDetails.imdbVotes} votes)`
+			media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
+			media.image = imdbDetails.Poster
+			Logger.info("ZtBot", "retrieveAdvancedReviews", "Found advanced reviews for "+media.name, media.imdb_reviews)
 		}
 
 		private findBetterVersionId(resultDetails: MediaDetails) : MediaSearchResult {
@@ -810,7 +872,7 @@ namespace ZtBot {
 			return this.callApi(this.alldebridApiUrl+url, null, "GET", "");
 		}
 
-        private async callApi(url = '', body = {}, method = 'POST', bearerToken = "") 
+        private async callApi(url = '', body = {}, method = 'POST', auth_header = "") 
         {
             await this.sleep(277);
             let response = null;
@@ -828,7 +890,7 @@ namespace ZtBot {
                         "sec-fetch-site": "same-origin",
                         "x-requested-with": "XMLHttpRequest",
                         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        // "Authorization": bearerToken == "" ? null : "Bearer "+bearerToken
+                        "Authorization": auth_header == "" ? null : auth_header
                     },
                     "body": body == null ? null : JSON.stringify(body),
                     "method": method
@@ -918,6 +980,7 @@ namespace ZtBot {
         ztApiUrl:string;
         alldebridApiUrl:string;
         alldebridApiKey:string;
+        apikey_collectapi:string;
         filmsUrl:string;
     }
 }

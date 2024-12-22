@@ -399,6 +399,11 @@ module DiscordBot {
                     else
                     {
                         let button = new Discord.ButtonBuilder();
+                        if (aButton.label.length > 80)
+                        {
+                            Logger.warning(this.prefix(), "Button label too long, truncating", aButton.label)
+                            aButton.label = aButton.label.substring(0, 75) + "..."
+                        }
                         button.setLabel(aButton.label)
                         button.setEmoji(aButton.emoji)
                         if (aButton.url)
@@ -448,7 +453,7 @@ module DiscordBot {
                 message.setImage(options.image)
             }
 
-            if (actionRow && actionRow.components.length > 0)
+            if (actionRow && actionRow.components.length > 0 && !isButtonsFull)
             {
                 actionRows.push(actionRow)
             }
