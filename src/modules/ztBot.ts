@@ -616,16 +616,21 @@ namespace ZtBot {
 			}
 
 			let reviewStars = ""
-			if (media.review) {
-				let nb_stars = Math.floor(parseFloat(media.review.split('/')[0]))
-				for (let i = 0; i < nb_stars; i++)
+			if (media.imdb_reviews) {
+				let nb_stars = parseFloat(media.review.split('/')[0])/2
+				while (nb_stars >= 1)
 				{
-					reviewStars += "★"
+					reviewStars += "✭"
+					nb_stars--
+				}
+				if (nb_stars > 0)
+				{
+					reviewStars += "✯"
 				}
 				// then empty stars
-				for (let i = nb_stars; i < 5; i++)
+				while (reviewStars.length < 5)
 				{
-					reviewStars += "☆"
+					reviewStars += "✩"
 				}
 			}
 			this.discordBot.sendMessage(descriptionPrefix + media.synopsis, {
@@ -674,7 +679,7 @@ namespace ZtBot {
 			}
 			
 			media.name = imdbDetails.Title
-			media.review = ""+(parseFloat(imdbDetails.imdbRating)/2)
+			media.review = imdbDetails.imdbRating
 			media.imdb_reviews = `**${imdbDetails.imdbRating}/10** (${imdbDetails.imdbVotes} votes)`
 			media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
 			media.image = imdbDetails.Poster

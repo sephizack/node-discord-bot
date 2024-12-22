@@ -524,12 +524,12 @@ module DiscordBot {
                 return
             }
             
+            let botMention = `<@${this.client.user.id}>`
             // Check mentions
-            const matches = message.mentions.members.filter(member => member.id === this.client.user.id);
-            if (matches.size > 0) {
-                Logger.debug(this.prefix(), "Mention for bot found in message", message.content)
-                message.content = message.content.replace(/<@.*>/, "").trim()
-                this.userActionCallback("mention", message.content)
+            message.content = message.content.trim()
+            if (message.content.indexOf(botMention) !== -1) {
+                Logger.debug(this.prefix(), "Mention for bot found in message:", message.content)
+                this.userActionCallback("mention", message.content.replace(botMention, "").trim())
             }
             else if (message.content.indexOf("!") == 0) {
                 this.userActionCallback("message", message.content)
