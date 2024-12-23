@@ -59,7 +59,6 @@ namespace ZtBot {
 			this.ztApiUrl = configData.ztApiUrl
 			this.alldebridApiUrl = configData.alldebridApiUrl
 			this.alldebridApiKey = configData.alldebridApiKey
-			this.apikey_collectapi = configData.apikey_collectapi
 			this.filmsUrl = configData.filmsUrl
 
             this.discordBot.sendMessage("Use buttons to interact", {
@@ -71,6 +70,13 @@ namespace ZtBot {
 
 			this.startNewItemNotifierDeamon('films')
 			this.startNewItemNotifierDeamon('series')
+
+			let media:MediaDetails = {
+				id: "12345",
+				type: "films",
+				name: "Le Parrain",
+			}
+			this.retrieveAdvancedReviews(media)
         }
 
 		private async startNewItemNotifierDeamon(category: string) {
@@ -644,7 +650,6 @@ namespace ZtBot {
 
 		private async retrieveAdvancedReviews(media: MediaDetails)
 		{
-			let api_auth = "apikey "+this.apikey_collectapi
 			if (!media.name)
 			{
 				return null
@@ -665,25 +670,65 @@ namespace ZtBot {
 			let bestImdbId = links[1].split('/')[0]
 			Logger.info("ZtBot", "retrieveAdvancedReviews", "Found imdbId for "+media.name, bestImdbId)
 
-			let reply_for_id = await this.callApi(`https://api.collectapi.com/imdb/imdbSearchById?movieId=${bestImdbId}`, null, "GET", api_auth);
-			if (reply_for_id.status != 200 || reply_for_id?.isJson == false || reply_for_id.data.success == false)
+			let replyImdbPage = await this.callApi(`https://www.imdb.com/title/${bestImdbId}/`, null, "GET", "");
+			if (replyImdbPage.status != 200)
 			{
-				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot retrieve advanced reviews", media.name)
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find imdb page for id "+media.name, reply)
 				return null
 			}
-			let imdbDetails = reply_for_id.data.result;
-			if (!imdbDetails)
-			{
-				Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find details for imdbId", bestImdbId)
-				return null
-			}
-			
-			media.name = imdbDetails.Title
-			media.review = imdbDetails.imdbRating
-			media.imdb_reviews = `**${imdbDetails.imdbRating}/10** (${imdbDetails.imdbVotes} votes)`
 			media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
-			media.image = imdbDetails.Poster
-			Logger.info("ZtBot", "retrieveAdvancedReviews", "Found advanced reviews for "+media.name, media.imdb_reviews)
+
+			let pageHtml = replyImdbPage.data
+			try {
+				// Title
+				let title = pageHtml.split('<title>')[1].split('</title>')[0].split('(')[0].trim()
+				media.name = title
+				Logger.info("ZtBot", "retrieveAdvancedReviews", "Found imdb title", title)
+
+				// Ratings
+				let ratingStart = pageHtml.split('hero-rating-bar__aggregate-rating__score')
+				if (ratingStart.length == 1)
+				{
+					Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find imdb rating for id "+media.name)
+					return null
+				}
+				let ratingHtml = ratingStart[1].split('</span>')
+				let average = ratingHtml[0].split('>')[2]
+				let votes = ratingHtml[2].split('>')[4].split('<')[0]
+				media.review = average
+				media.imdb_reviews = `**${average}/10** (${votes} votes)`
+				Logger.info("ZtBot", "retrieveAdvancedReviews", "Found imdb ratings ", media.imdb_reviews)
+
+				// Image
+				let posterImgUrl = pageHtml.split('hero-media__poster')[1].split('sizes="')[0].split('https://').pop().split(' ')[0]
+				media.image = 'https://' + posterImgUrl
+				Logger.info("ZtBot", "retrieveAdvancedReviews", "Found imdb poster", media.image)
+			}
+			catch (e) {
+				Logger.error("ZtBot", "retrieveAdvancedReviews", "Error while parsing imdb page for "+media.name)
+				return null
+			}
+
+
+			// let reply_for_id = await this.callApi(`https://api.collectapi.com/imdb/imdbSearchById?movieId=${bestImdbId}`, null, "GET", api_auth);
+			// if (reply_for_id.status != 200 || reply_for_id?.isJson == false || reply_for_id.data.success == false)
+			// {
+			// 	Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot retrieve advanced reviews", media.name)
+			// 	return null
+			// }
+			// let imdbDetails = reply_for_id.data.result;
+			// if (!imdbDetails)
+			// {
+			// 	Logger.error("ZtBot", "retrieveAdvancedReviews", "Cannot find details for imdbId", bestImdbId)
+			// 	return null
+			// }
+			
+			// media.name = imdbDetails.Title
+			// media.review = imdbDetails.imdbRating
+			// media.imdb_reviews = `**${imdbDetails.imdbRating}/10** (${imdbDetails.imdbVotes} votes)`
+			// media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
+			// media.image = imdbDetails.Poster
+			// Logger.info("ZtBot", "retrieveAdvancedReviews", "Found advanced reviews for "+media.name, media.imdb_reviews)
 		}
 
 		private findBetterVersionId(resultDetails: MediaDetails) : MediaSearchResult {
@@ -985,7 +1030,6 @@ namespace ZtBot {
         ztApiUrl:string;
         alldebridApiUrl:string;
         alldebridApiKey:string;
-        apikey_collectapi:string;
         filmsUrl:string;
     }
 }
