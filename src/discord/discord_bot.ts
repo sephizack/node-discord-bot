@@ -2,8 +2,6 @@ import Discord from 'discord.js'
 import Logger from '../modules/logger.js'
 import PostAction from './PostAction.js'
 import Utils from './utils.js'
-import config from 'config';
-import https from 'https'
 
 module DiscordBot {
 
@@ -344,6 +342,7 @@ module DiscordBot {
         }
         
         public async sendMessage(content:string, options:any = {}) {
+            let all_buttons : Discord.ButtonBuilder[] = []
             let message = new Discord.EmbedBuilder();
             message.setDescription(content)
             if (options.color)
@@ -374,76 +373,13 @@ module DiscordBot {
                 }
             }
 
-            let actionRows = []
-            let actionRow = new Discord.ActionRowBuilder();
-            let hasButtons = false
-            let isButtonsFull = false
             if (options.buttons)
             {
                 for (let aButton of options.buttons) {
-                    if (!aButton || !aButton.label)
+                    let button = this.buildButton(aButton)
+                    if (button)
                     {
-                        Logger.error(this.prefix(), "Button must have a label", aButton)
-                        continue
-                    }
-                    if (isButtonsFull)
-                    {
-                        Logger.warning(this.prefix(), "Max number of buttons reached, best effort adding it as field")
-                        message.addFields({
-                            name: `[Button backup] ${aButton.emoji} ${aButton.label}`,
-                            value: `${aButton.url ? aButton.url : 
-                                `Action ${aButton.actionDescription ? aButton.actionDescription : aButton.label} (Cannot be excuted as max buttons reached)`}`
-                        })
-                        continue
-                    }
-                    else
-                    {
-                        let button = new Discord.ButtonBuilder();
-                        if (aButton.label.length > 80)
-                        {
-                            Logger.warning(this.prefix(), "Button label too long, truncating", aButton.label)
-                            aButton.label = aButton.label.substring(0, 75) + "..."
-                        }
-                        button.setLabel(aButton.label)
-                        button.setEmoji(aButton.emoji)
-                        if (aButton.url)
-                        {
-                            button.setStyle(Discord.ButtonStyle.Link)
-                            button.setURL(aButton.url)
-                        }
-                        else if (aButton.callback)
-                        {
-                            let actionDescription = aButton.actionDescription ? aButton.actionDescription : aButton.label
-                            button.setStyle(aButton.isSecondary ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Primary)
-                            if (aButton?.options?.needsConfirmation)
-                            {
-                                button.setStyle(Discord.ButtonStyle.Danger)
-                            }
-                            let postActionId = Utils.getNewTokenForMap(this.postActionMap, 26)
-                            let postAction = new PostAction(actionDescription, '', 1, aButton.callback, aButton.options)
-                            this.postActionMap.set(postActionId, postAction)
-                            // Logger.debug(this.prefix(), "Post action created", postActionId)
-                            button.setCustomId(postActionId)
-                        }
-                        else
-                        {
-                            throw new Error("Button must have either a URL or a callback")
-                        }
-                        actionRow.addComponents(button)
-                        hasButtons = true
-                    }
-                    if (actionRow.components.length == 5)
-                    {
-                        actionRows.push(actionRow)
-                        if (actionRows.length == 5)
-                        {
-                            isButtonsFull = true
-                            actionRow = null
-                        }
-                        else
-                        {
-                            actionRow = new Discord.ActionRowBuilder();
-                        }
+                        all_buttons.push(button)
                     }
                 }
             }
@@ -453,22 +389,116 @@ module DiscordBot {
                 message.setImage(options.image)
             }
 
-            if (actionRow && actionRow.components.length > 0 && !isButtonsFull)
+            
+            // Send messages
+            try {
+                let publications = this.buildPublications(message, all_buttons)
+                for (let publi of publications)
+                {
+                    for (let aChannel of this.channelsToNotify) {
+                        await aChannel.send(publi)
+                    }
+                }
+            } catch (error) {
+                Logger.error(this.prefix(), "Error sending message", error, message)
+            }
+        }
+        
+        private buildPublications(message: Discord.EmbedBuilder, all_buttons: Discord.ButtonBuilder[]) {
+            if (all_buttons.length == 0)
+            {
+                return [{ embeds: [message] }]
+            }
+            let publications = []
+            // We should have 1 actionRows per 25 buttons
+            let actionRowsList : Discord.ActionRowBuilder[][] = this.buildActionRowsList(all_buttons)
+            for (let actionRows of actionRowsList)
+            {
+                let aMessageToSend = null
+                if (publications.length == 0)
+                {
+                    publications.push({ embeds: [message], components: actionRows})
+                } else
+                {
+                    publications.push({ embeds: [{
+                        title: message.data.title,
+                        description: "*Additional actions from previous message*",
+                        color: message.data.color
+                    }], components: actionRows})
+                }
+            }
+            return publications
+        }
+        
+        private buildButton(aButton: any): Discord.ButtonBuilder {
+            if (!aButton || !aButton.label)
+            {
+                Logger.error(this.prefix(), "Button must have a label", aButton)
+                return null
+            }
+            
+            let button = new Discord.ButtonBuilder();
+            if (aButton.label.length > 80)
+            {
+                Logger.warning(this.prefix(), "Button label too long, truncating", aButton.label)
+                aButton.label = aButton.label.substring(0, 75) + "..."
+            }
+            button.setLabel(aButton.label)
+            button.setEmoji(aButton.emoji)
+            if (aButton.url)
+            {
+                button.setStyle(Discord.ButtonStyle.Link)
+                button.setURL(aButton.url)
+            }
+            else if (aButton.callback)
+            {
+                let actionDescription = aButton.actionDescription ? aButton.actionDescription : aButton.label
+                button.setStyle(aButton.isSecondary ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Primary)
+                if (aButton?.options?.needsConfirmation)
+                {
+                    button.setStyle(Discord.ButtonStyle.Danger)
+                }
+                let postActionId = Utils.getNewTokenForMap(this.postActionMap, 26)
+                let postAction = new PostAction(actionDescription, '', 1, aButton.callback, aButton.options)
+                this.postActionMap.set(postActionId, postAction)
+                // Logger.debug(this.prefix(), "Post action created", postActionId)
+                button.setCustomId(postActionId)
+            }
+            else
+            {
+                Logger.error(this.prefix(), "Button must have either a URL or a callback", aButton)
+                return null
+            }
+            return button
+        }
+
+        private buildActionRowsList(all_buttons: Discord.ButtonBuilder[]): Discord.ActionRowBuilder[][] {
+            let actionRowsList : Discord.ActionRowBuilder[][] = []
+            let actionRows : Discord.ActionRowBuilder[] = []
+            let actionRow = new Discord.ActionRowBuilder();
+            let isButtonsFull = false
+            for (let aButton of all_buttons) {
+                actionRow.addComponents(aButton)
+                if (actionRow.components.length == 5)
+                {
+                    actionRows.push(actionRow)
+                    if (actionRows.length == 5)
+                    {
+                        actionRowsList.push(actionRows)
+                        actionRows = []
+                    }
+                    actionRow = new Discord.ActionRowBuilder();
+                }
+            }
+            if (actionRow && actionRow.components.length > 0)
             {
                 actionRows.push(actionRow)
             }
-
-            // Send message
-            for (let aChannel of this.channelsToNotify) {
-                if (hasButtons)
-                {
-                    aChannel.send({ embeds: [message] , components: actionRows})
-                }
-                else
-                {
-                    aChannel.send({ embeds: [message]})
-                }
+            if (actionRows.length > 0)
+            {
+                actionRowsList.push(actionRows)
             }
+            return actionRowsList
         }
 
         public async sendPoll(question:string, answers:any, options:CustomPollOptions = {}) {
