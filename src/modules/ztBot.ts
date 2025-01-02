@@ -684,7 +684,7 @@ namespace ZtBot {
 				let bestImdbId = links[1].split('/')[0]
 				Logger.info("ZtBot", "retrieveImdbInfos", "Found imdbId for "+media.name, bestImdbId)
 
-				let replyImdbPage = await this.callApi(`https://www.imdb.com/title/${bestImdbId}/`, null, "GET", "");
+				replyImdbPage = await this.callApi(`https://www.imdb.com/title/${bestImdbId}/`, null, "GET", "");
 				if (replyImdbPage.status != 200)
 				{
 					Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb page for id "+media.name, reply)
@@ -694,6 +694,11 @@ namespace ZtBot {
 			}
 			catch (e) {
 				Logger.error("ZtBot", "retrieveImdbInfos", "Error while retrieving imdb infos for "+media.name)
+				return null
+			}
+
+			if (replyImdbPage == null)
+			{
 				return null
 			}
 
