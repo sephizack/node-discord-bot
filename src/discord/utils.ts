@@ -20,7 +20,8 @@ module Utils {
     export const TASK_EXEC_RESULT = {
         RETRY: 0,
         DONE: 1,
-        ABORT: 2
+        ABORT: 2,
+        NO_SLOT_AVAIL: 3
     }
 
 

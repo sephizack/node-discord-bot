@@ -580,6 +580,24 @@ namespace ZtBot {
 
 			buttons.push(this.getDebrideurButton());
 
+			let allLinks = []
+			buttons.push({
+				label: `Get all links`,
+				emoji: "📋",
+				options: {
+					announcement:false,
+					executeOnlyOnce: true
+				},
+				callback: async (inputs) => {
+					let linksTxt = ""
+					for (let aLink of allLinks)
+					{
+						linksTxt += ` - ${aLink.url}\n`
+					}
+					return linksTxt
+				}
+			})
+
 			let bestLink = null
 			if (media.downloadLinks) {
 				for (let aLink of media.downloadLinks) {
@@ -590,6 +608,7 @@ namespace ZtBot {
 					{
 						bestLink = aLink
 					}
+					allLinks.push(aLink)
 					buttons.push({
 						label: aLink.dlname,
 						emoji: "⬇️",
@@ -643,33 +662,40 @@ namespace ZtBot {
 
 		private async retrieveImdbInfos(media: MediaDetails)
 		{
-			if (!media.name)
-			{
-				return null
-			}
-			let reply = await this.callApi(`https://www.imdb.com/find/?q=${encodeURIComponent(media.name)}`, null, "GET", "");
-			if (reply.status != 200)
-			{
-				Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb id for "+media.name, reply)
-				return null
-			}
-			let links = reply.data.split('href="/title/')
-			if (links.length == 0)
-			{
-				Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb id for "+media.name)
-				return null
-			}
+			let replyImdbPage = null;
+			try {
+				if (!media.name)
+				{
+					return null
+				}
+				let reply = await this.callApi(`https://www.imdb.com/find/?q=${encodeURIComponent(media.name)}`, null, "GET", "");
+				if (reply.status != 200)
+				{
+					Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb id for "+media.name, reply)
+					return null
+				}
+				let links = reply.data.split('href="/title/')
+				if (links.length == 0)
+				{
+					Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb id for "+media.name)
+					return null
+				}
 
-			let bestImdbId = links[1].split('/')[0]
-			Logger.info("ZtBot", "retrieveImdbInfos", "Found imdbId for "+media.name, bestImdbId)
+				let bestImdbId = links[1].split('/')[0]
+				Logger.info("ZtBot", "retrieveImdbInfos", "Found imdbId for "+media.name, bestImdbId)
 
-			let replyImdbPage = await this.callApi(`https://www.imdb.com/title/${bestImdbId}/`, null, "GET", "");
-			if (replyImdbPage.status != 200)
-			{
-				Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb page for id "+media.name, reply)
+				let replyImdbPage = await this.callApi(`https://www.imdb.com/title/${bestImdbId}/`, null, "GET", "");
+				if (replyImdbPage.status != 200)
+				{
+					Logger.error("ZtBot", "retrieveImdbInfos", "Cannot find imdb page for id "+media.name, reply)
+					return null
+				}
+				media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
+			}
+			catch (e) {
+				Logger.error("ZtBot", "retrieveImdbInfos", "Error while retrieving imdb infos for "+media.name)
 				return null
 			}
-			media.imdbUrl = `https://www.imdb.com/title/${bestImdbId}`
 
 			let pageHtml = replyImdbPage.data
 			try {

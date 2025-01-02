@@ -14,6 +14,8 @@ namespace BookingBot {
             this.discordBot = discordBot
             this.tasks = []
             this.allowedTimes = configData.allowedTimes
+            this.targetTime = configData.targetTime
+            this.backupTime = configData.backupTime
             this.blacklistesProposalDates = new Set()
             this.autoMonitorConfig = {}
 
@@ -41,7 +43,7 @@ namespace BookingBot {
                         this.autoMonitor(clubName, configClub.autoMonitor)
                         startUpAnnounceFields.push({
                             name: `Auto-monitoring running for ${this.getClubFullName(clubName)}`,
-                            value: `Trying to find available slots at ${configClub.autoMonitor.targetTime}`
+                            value: `Trying to find available slots`
                         })
                     }
                 }
@@ -69,7 +71,7 @@ namespace BookingBot {
 							// {id: "type", label: "Type of search (films, series)", value: "films"},
 							{id: "club_name", label: "Club", placeholder: "allin | ballejaune", value: "allin"},
 							{id: "date", label: "Date", placeholder: "eg. 25MAR or 12JAN2025"},
-                            {id: "time", label: "Time", placeholder: "eg. 18:30", value: "18:30"},
+                            {id: "time", label: "Time", placeholder: "eg. 18:30", value: this.targetTime},
 						],
                     },
                     callback: async (inputs) => {
@@ -99,8 +101,7 @@ namespace BookingBot {
                     callback: async () => {
                         let clubName = "allin"
                         let autoMonitor = this.autoMonitorConfig[clubName]
-                        // this.notifyWithFields("Checking available slots", `At ${this.getClubFullName(clubName)} at ${autoMonitor.targetTime}`, "#009dff")
-                        await this.handleAutoMonitorOccurence(clubName, autoMonitor, true);
+                        await this.handleAutoMonitorOccurence(clubName, autoMonitor, true, this.targetTime);
                     }
                 },
                 {
@@ -188,7 +189,7 @@ namespace BookingBot {
                         for (let day of daysOk)
                         {
                             daysBooked.push(day)
-                            this.createBookingTask("allin", day, "18:30")
+                            this.createBookingTask("allin", day, this.targetTime)
                         }
                     }
                 }
@@ -202,7 +203,13 @@ namespace BookingBot {
             new CronJob(
                 autoMonitor.runCrontime,
                 async function () {
-                    aBookingBot.handleAutoMonitorOccurence(clubName, autoMonitor);
+                    await aBookingBot.cronJob(clubName, autoMonitor);
+                    // On Saturday propose poll
+                    let today = new Date()
+                    if (today.getDay() == 6)
+                    {
+                        aBookingBot.startNextWeekPoll()
+                    }
                 },
                 null,
                 true,
@@ -210,7 +217,25 @@ namespace BookingBot {
             );
         }
 
-        private async handleAutoMonitorOccurence(clubName: string, autoMonitor: any, tellWhenNoSlot = false) {
+        private async cronJob(clubName: string, autoMonitor: any) {
+            try {
+                await this.handleAutoMonitorOccurence(clubName, autoMonitor, false, this.targetTime);
+            }
+            catch (e)
+            {
+                Logger.error(`Auto-monitor for ${clubName} failed`, e)
+                // this.notifyWithFields("Auto Monitoring "+clubName, "Unexpected failure", "#ff0000", [{name: "Exception", value: e}])
+            }
+
+            // And on Saturday propose poll
+            let today = new Date()
+            if (today.getDay() == 6)
+            {
+                this.startNextWeekPoll()
+            }
+        }
+
+        private async handleAutoMonitorOccurence(clubName: string, autoMonitor: any, tellWhenNoSlot: boolean, targetedTime: string) {
             let clubsFullName = this.getClubFullName(clubName);
             let clubBookingObject = this.clubs[clubName];
             Logger.info(`Running auto-monitor for ${clubsFullName}`)
@@ -218,7 +243,7 @@ namespace BookingBot {
             try {
                 for (let dayOffset of autoMonitor.daysOffset)
                 {
-                    let newAvail = await this.getAvailableSlots(clubName, autoMonitor, dayOffset);
+                    let newAvail = await this.getAvailableSlots(clubName, autoMonitor, dayOffset, targetedTime);
                     availableSlots.push(...newAvail)
                 }
 
@@ -244,13 +269,13 @@ namespace BookingBot {
                             let nextWeekDayStr = nextWeekDay.toISOString().split('.')[0].split('T')[0];
                             this.notifyWithFields("👟 " + clubsFullName + " reminder", "Don't forget your gear for tomorrow's session 😉", "#00ff15", fields, [
                                 {
-                                    label: `Re-book next week (${nextWeekDayStr} 18:30)`,
+                                    label: `Re-book next week (${nextWeekDayStr} ${targetedTime})`,
                                     emoji: "👟",
                                     options: {
                                         announcement: true
                                     },
                                     callback: () => {
-                                        this.createBookingTask(clubName, nextWeekDayStr, "18:30");
+                                        this.createBookingTask(clubName, nextWeekDayStr, targetedTime);
                                     }
                                 },
                                 {
@@ -321,10 +346,10 @@ namespace BookingBot {
 
             if (Object.keys(availableSlotsByDate).length == 0)
             {
-                Logger.info(`No interesting slots found for ${clubsFullName} at ${autoMonitor.targetTime}`)
+                Logger.info(`No interesting slots found for ${clubsFullName} at ${targetedTime}`)
                 if (tellWhenNoSlot)
                 {
-                    this.notifyWithFields("No slots found", `At ${clubsFullName} at ${autoMonitor.targetTime}`, "#ff0000")
+                    this.notifyWithFields("No slots found", `At ${clubsFullName} at ${targetedTime}`, "#ff0000")
                 }
                 return
             }
@@ -362,15 +387,9 @@ namespace BookingBot {
                     }
                 ]);
             }
-            // On Saturday propose poll
-            let today = new Date()
-            if (today.getDay() == 6)
-            {
-                this.startNextWeekPoll()
-            }
         }
 
-        private async getAvailableSlots(clubName: string, autoMonitor: any, dayOffset: any) {
+        private async getAvailableSlots(clubName: string, autoMonitor: any, dayOffset: any, targetedTime: string) {
             let clubsFullName = this.getClubFullName(clubName);
             let clubBookingObject = this.clubs[clubName];
 
@@ -379,14 +398,23 @@ namespace BookingBot {
             let targetDateStr = targetDate.toISOString().split('.')[0].split('T')[0]
             let availableSlots = await clubBookingObject.listAvailableSlots(
                 targetDateStr,
-                autoMonitor.targetTime,
-                this.getNextTime(autoMonitor.targetTime)
+                targetedTime,
+                this.getNextTime(targetedTime)
             );
             if (availableSlots == null)
             {
                 Logger.error(`Auto-monitor for ${clubsFullName} failed`)
                 this.notifyWithFields("Auto Monitoring "+clubsFullName, "Unexpected failure", "#ff0000", clubBookingObject.getLogs())
                 return []
+            }
+            if (availableSlots.length == 0)
+            {
+                Logger.info(`No slots found for ${clubsFullName} at ${targetedTime} on ${targetDateStr}`)
+                if (targetedTime == this.targetTime)
+                {
+                    Logger.info(`Trying backup time ${this.backupTime}`)
+                    return this.getAvailableSlots(clubName, autoMonitor, dayOffset, this.backupTime);
+                }
             }
             return availableSlots;
         }
@@ -447,12 +475,12 @@ namespace BookingBot {
                 title: "Help",
                 fields: [
                     {
-                        name: "!task book <club-name> 25MAR 18:30",
+                        name: "!task book <club-name> 25MAR "+this.targetTime,
                         value: "Book at 18h00 on 25th of March."
                     },
                     {
                         name: "!task book 25MAR",
-                        value: "Book with default All-in and 18:30."
+                        value: "Book with default All-in and "+ this.targetTime
                     },
                     {
                         name: "!task list-bookings <club-name>",
@@ -542,7 +570,7 @@ namespace BookingBot {
             {
                 if (taskDataSplit.length == 2)
                 {
-                    taskDataSplit = ["book", "allin", taskDataSplit[1], "18:30"]
+                    taskDataSplit = ["book", "allin", taskDataSplit[1], this.targetTime]
                 }
                 if (taskDataSplit.length != 4)
                 {
@@ -862,6 +890,18 @@ namespace BookingBot {
                         this.notifyTaskMessage(iTask, `Booked successfully at '${iTask.club}' after ${iTask.tries} tries`, "#00ff00")
                         this.listBookingsForClub(iTask.club)
                     }
+                    else if (isBooked == Utils.TASK_EXEC_RESULT.NO_SLOT_AVAIL)
+                    {
+                        iTask.status = "abandonned"
+                        if (iTask.time == this.targetTime)
+                        {
+                            this.notifyTaskMessage(iTask, `Every slots are booked, trying again with backup time ${this.backupTime}`, "#f30aff")
+                            this.createBookingTask(iTask.club, iTask.date, this.backupTime)
+                        }
+                        else {
+                            this.notifyTaskMessage(iTask, `Every slots are full even with backup time ${this.backupTime}`, "#ff0000")
+                        }
+                    }
                     else if (isBooked == Utils.TASK_EXEC_RESULT.ABORT)
                     {
                         iTask.status = "abandonned"
@@ -902,6 +942,8 @@ namespace BookingBot {
         tasks:any;
         clubs:any;
         allowedTimes:any;
+        targetTime:any;
+        backupTime:any;
         blacklistesProposalDates:Set<String>;
         autoMonitorConfig:any;
     }

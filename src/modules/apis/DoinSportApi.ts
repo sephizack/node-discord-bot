@@ -51,6 +51,7 @@ namespace apis {
                 {
                     return null;
                 }
+                Logger.info("Listing available slots for", date, time, endTime);
                 let {availableSlots, alreadyBookedFound} = await this.getAvailableSlots(date, time, endTime, bearerToken);
                 if (availableSlots == null || availableSlots.length == 0)
                 {
@@ -125,7 +126,7 @@ namespace apis {
                     if (alreadyBookedFound)
                     {
                         this.addLog("notify", "Everything is booked, no need to try again");
-                        return Utils.TASK_EXEC_RESULT.ABORT;
+                        return Utils.TASK_EXEC_RESULT.NO_SLOT_AVAIL;
                     }
                     else
                     {
@@ -199,9 +200,11 @@ namespace apis {
                         let startTime = startAt.split('T')[1].split('+')[0].replace(":00:00", ":00").replace(":30:00", ":30")
                         let endTime = endAt.split('T')[1].split('+')[0].replace(":00:00", ":00").replace(":30:00", ":30")
                         let playgroundName = booking["playgrounds"][0]["name"]
+                        let localStartTime = new Date(booking["startAt"]).toLocaleTimeString().replace(":00:00", ":00").replace(":30:00", ":30")
+                        let localEndTime = new Date(booking["endAt"]).toLocaleTimeString().replace(":00:00", ":00").replace(":30:00", ":30")
                         bookingsOk.push({
                             title: playgroundName,
-                            description: `From ${startTime} to ${endTime} (GMT ?)`,
+                            description: `From ${localStartTime} to ${localEndTime}`,
                             date: startAt.split('T')[0],
                             time: startTime,
                             endDate: endAt.split('T')[0],
